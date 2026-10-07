@@ -1,0 +1,67 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "RT Captions",
+  "version": "0.1.0",
+  "identifier": "org.intelehealth.rtcaptions",
+  "build": {
+    "frontendDist": "../ui",
+    "beforeBuildCommand": "node src-tauri/scripts/prepare-cli.mjs"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "settings",
+        "title": "RT Captions - Settings",
+        "url": "settings.html",
+        "create": false,
+        "width": 460,
+        "height": 760,
+        "minWidth": 400,
+        "minHeight": 520
+      },
+      {
+        "label": "overlay",
+        "title": "Captions",
+        "url": "overlay.html",
+        "create": false,
+        "width": 1000,
+        "height": 170,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": false,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "dmg",
+      "app"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "externalBin": [
+      "binaries/rt-captions"
+    ],
+    "windows": {
+      "nsis": {
+        "installerHooks": "installer-hooks.nsh"
+      }
+    }
+  },
+  "mainBinaryName": "rt-captions-app"
+}

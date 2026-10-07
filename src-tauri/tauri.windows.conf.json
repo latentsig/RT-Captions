@@ -1,0 +1,11 @@
+{
+  "bundle": {
+    "resources": {
+      "engine/windows/libparakeet.dll": "engine/libparakeet.dll",
+      "engine/windows/libc++.dll": "engine/libc++.dll",
+      "engine/windows/libomp.dll": "engine/libomp.dll",
+      "engine/windows/libunwind.dll": "engine/libunwind.dll",
+      "engine/windows/libneedle.dll": "engine/libneedle.dll"
+    }
+  }
+}

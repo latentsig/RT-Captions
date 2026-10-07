@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Captions</title>
+  <style>
+    :root {
+      --fg: #fff;
+      --bg: rgba(16, 16, 20, .72);
+      --size: 30px;
+      --font: "Segoe UI Variable Text", "Segoe UI", -apple-system, system-ui, sans-serif;
+      --lines: 3;
+      --lh: 1.32;
+      --mic: #fff3b0;
+      --sys: #b8f4ff;
+    }
+    html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+    #box {
+      position: fixed; inset: 0; box-sizing: border-box;
+      padding: 12px 22px 14px;
+      border-radius: 16px;
+      background: var(--bg);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08);
+      display: flex; flex-direction: column; justify-content: flex-end; gap: 6px;
+      transition: opacity .35s ease;
+    }
+    body.gone #box { opacity: 0; }
+    body.draggable #box { cursor: grab; }
+    body.draggable #box:active { cursor: grabbing; }
+
+    #text {
+      font-family: var(--font); font-size: var(--size); font-weight: 600;
+      line-height: var(--lh); color: var(--fg);
+      letter-spacing: .005em;
+      max-height: calc(var(--lines) * var(--lh) * 1em);
+      overflow: hidden;
+      display: flex; flex-direction: column; justify-content: flex-end;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, .85), 0 0 1px rgba(0, 0, 0, .9);
+      -webkit-font-smoothing: antialiased;
+    }
+    .seg { margin: 0; }
+    /* "Both" mode: who is speaking is shown by colour, not a label */
+    body.labeled .src-mic { color: var(--mic); }
+    body.labeled .src-system { color: var(--sys); }
+    .pending { opacity: .5; }
+    .new { animation: rise .22s ease-out; }
+    @keyframes rise { from { opacity: 0; } to { opacity: 1; } }
+
+    #status {
+      font: 600 14px/1.35 var(--font); color: #ffd3cc;
+      display: flex; gap: 8px; align-items: flex-start;
+    }
+    #status::before { content: "!"; flex: none; width: 18px; height: 18px; border-radius: 50%;
+      background: #ff6b57; color: #fff; font-size: 12px; display: grid; place-items: center; }
+    #status:empty { display: none; }
+    #status.info { color: #d8e6ff; }
+    #status.info::before { content: "↓"; background: #3d6fd9; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .new { animation: none; }
+      #box { transition: none; }
+    }
+  </style>
+</head>
+<body class="gone">
+  <div id="box" data-tauri-drag-region>
+    <div id="status" data-tauri-drag-region role="alert"></div>
+    <div id="text" data-tauri-drag-region aria-live="polite"></div>
+  </div>
+  <script>
+    const { listen } = window.__TAURI__.event;
+    const { invoke } = window.__TAURI__.core;
+    const win = window.__TAURI__.window.getCurrentWindow();
+    const $ = id => document.getElementById(id);
+    const MAX_SEGMENTS = 12;
+
+    let settings = null;
+    let status = "";
+    // committed history: [{ source, text, fresh }] — `fresh` is the tail added by the latest event
+    let segments = [];
+    let pending = { source: "mic", text: "" };
+    let shown = false;
+    let hideTimer = 0, fadeTimer = 0;
+
+    const labeled = () => settings && settings.audio.source === "both";
+
+    // ---------- visibility (one-shot timers only; nothing runs while idle) ----------
+    function reveal() {
+      clearTimeout(fadeTimer);
+      document.body.classList.remove("gone");
+      if (!shown) { shown = true; win.show(); }
+    }
+    function conceal() {
+      clearTimeout(hideTimer);
+      document.body.classList.add("gone");
+      clearTimeout(fadeTimer);
+      fadeTimer = setTimeout(() => { if (shown) { shown = false; win.hide(); } }, 380);
+    }
+    function refreshVisibility(activity) {
+      if (!settings) return;
+      if (!settings.overlay) return conceal();
+      if (status) { clearTimeout(hideTimer); return reveal(); }
+      if (!settings.auto_hide) { clearTimeout(hideTimer); return reveal(); }
+      if (activity) {
+        reveal();
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(conceal, Math.max(1, Number(settings.style.hide_after_s) || 5) * 1000);
+      } else if (!shown) {
+        conceal();
+      }
+    }
+
+    // ---------- captions ----------
+    function lastSegment() { return segments[segments.length - 1]; }
+
+    function addCommitted(source, text, raw) {
+      let seg = lastSegment();
+      const newSpeaker = labeled() && (!seg || seg.source !== source);
+      if (!seg || seg.closed || newSpeaker) {
+        seg = { source, text: "", fresh: "" };
+        segments.push(seg);
+        if (segments.length > MAX_SEGMENTS) segments.splice(0, segments.length - MAX_SEGMENTS);
+      }
+      for (const s of segments) s.fresh = "";
+      // raw: a streamed fragment that carries its own spaces and may end mid-word ("the tra" + "ining")
+      const add = raw ? (seg.text ? text : text.trimStart()) : (seg.text ? " " : "") + text;
+      seg.text += add;
+      seg.fresh = add;
+    }
+
+    function render() {
+      const box = $("text");
+      box.textContent = "";
+      const p = pending.text;
+      let pendingPlaced = false;
+      segments.forEach((seg, i) => {
+        const el = document.createElement("p");
+        el.className = "seg src-" + seg.source;
+        el.dataset.tauriDragRegion = "";
+        const old = seg.text.slice(0, seg.text.length - seg.fresh.length);
+        if (old) el.append(old);
+        if (seg.fresh) el.append(span("new", seg.fresh));
+        const isLast = i === segments.length - 1;
+        if (p && isLast && !seg.closed && (!labeled() || seg.source === pending.source)) {
+          el.append(span("pending", (seg.text ? " " : "") + p));
+          pendingPlaced = true;
+        }
+        box.append(el);
+      });
+      if (p && !pendingPlaced) {
+        const el = document.createElement("p");
+        el.className = "seg src-" + pending.source;
+        el.dataset.tauriDragRegion = "";
+        el.append(span("pending", p));
+        box.append(el);
+      }
+    }
+    function span(cls, text) { const s = document.createElement("span"); s.className = cls; s.textContent = text; return s; }
+
+    listen("caption", ({ payload: c }) => {
+      if (c.committed) addCommitted(c.source, c.committed, c.raw);
+      else for (const s of segments) s.fresh = "";
+      pending = { source: c.source, text: c.pending || "" };
+      if (c.end_of_utterance) {
+        const seg = lastSegment();
+        if (seg && seg.source === c.source) seg.closed = true;
+        if (pending.source === c.source) pending.text = "";
+      }
+      render();
+      refreshVisibility(Boolean(c.committed || c.pending));
+    });
+
+    // ---------- status ----------
+    function setStatus(s) {
+      status = s || "";
+      $("status").textContent = status;
+      $("status").classList.toggle("info", status.startsWith("Downloading"));
+      refreshVisibility(false);
+    }
+    listen("status", ({ payload }) => setStatus(payload));
+
+    // ---------- settings ----------
+    function hexToRgb(hex) {
+      const h = String(hex || "#000000").replace("#", "").padEnd(6, "0");
+      return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) || 0);
+    }
+    function applySettings(s) {
+      const prevLabeled = labeled();
+      settings = s;
+      const st = s.style || {};
+      const r = document.documentElement.style;
+      const [R, G, B] = hexToRgb(st.bg);
+      r.setProperty("--fg", st.fg || "#ffffff");
+      r.setProperty("--bg", `rgba(${R}, ${G}, ${B}, ${st.opacity ?? 0.72})`);
+      r.setProperty("--size", (st.size || 30) + "px");
+      r.setProperty("--font", st.font || "system-ui, sans-serif");
+      r.setProperty("--lines", st.lines || 3);
+      r.setProperty("--mic", st.mic_color || "#fff3b0");
+      r.setProperty("--sys", st.system_color || "#b8f4ff");
+      document.body.classList.toggle("labeled", s.audio.source === "both");
+      document.body.classList.toggle("draggable", !s.click_through);
+      if (prevLabeled !== labeled()) { segments = []; pending.text = ""; }
+      render();
+      refreshVisibility(false);
+    }
+    listen("settings", ({ payload }) => applySettings(payload));
+
+    invoke("get_settings").then(applySettings).catch(e => setStatus(String(e)));
+    invoke("get_status").then(setStatus).catch(() => {});
+  </script>
+</body>
+</html>

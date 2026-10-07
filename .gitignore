@@ -1,0 +1,7 @@
+src-tauri/target/
+src-tauri/gen/
+src-tauri/engine/
+*.wav
+*.gguf
+*.cact
+src-tauri/binaries/
