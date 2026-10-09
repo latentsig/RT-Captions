@@ -85,6 +85,35 @@ pub const ENGINES: &[Engine] = &[
     },
 ];
 
+/// Optional add-on models for speaker labels (not speech engines; `kind`/`min_hop_s` are unused).
+pub const EXTRAS: &[Engine] = &[
+    Engine {
+        id: "diarization",
+        name: "Speaker diarization",
+        blurb: "Tells voices apart (Nemotron 3 diarization, 8-bit)",
+        kind: Kind::Streaming,
+        file: "nemotron-3-diarization-q8_0.gguf",
+        url: "https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/main/nemotron-3-diarization-q8_0.gguf",
+        bytes: 108_674_624,
+        min_hop_s: 0.0,
+    },
+    Engine {
+        id: "speakers",
+        name: "Speaker recognition",
+        blurb: "Recognises saved voices (WeSpeaker ResNet34, f32)",
+        kind: Kind::Streaming,
+        file: "wespeaker-resnet34-voxceleb.gguf",
+        url: "https://huggingface.co/mudler/voice-detect-gguf/resolve/main/wespeaker-resnet34-voxceleb.gguf",
+        bytes: 26_527_360,
+        min_hop_s: 0.0,
+    },
+];
+
+/// An engine or an extra model by id (what `download` accepts).
+pub fn get_any(id: &str) -> Result<&'static Engine> {
+    EXTRAS.iter().find(|e| e.id == id).map_or_else(|| get(id), Ok)
+}
+
 pub fn get(id: &str) -> Result<&'static Engine> {
     ENGINES.iter().find(|e| e.id == id).with_context(|| {
         format!("unknown engine '{id}' (one of: {})", ENGINES.iter().map(|e| e.id).collect::<Vec<_>>().join(", "))

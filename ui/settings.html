@@ -2,306 +2,575 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RT Captions</title>
   <style>
     :root {
       color-scheme: light dark;
-      --bg: #f3f3f6;
-      --card: #ffffff;
-      --card-line: rgba(0, 0, 0, .07);
-      --text: #1b1b1f;
-      --muted: #6b6b75;
-      --faint: #9a9aa3;
-      --accent: #2f6fed;
+      --bg: #f5f6f8;
+      --side: #eceef2;
+      --group: #ffffff;
+      --hair: rgba(0, 0, 0, .08);
+      --text: #1d1d1f;
+      --muted: #6b6c73;
+      --faint: #9b9ca4;
+      --accent: #007aff;
       --accent-ink: #ffffff;
-      --track: #d9d9e0;
-      --seg-bg: #ebebf0;
+      --accent-soft: rgba(0, 122, 255, .11);
+      --sel: rgba(0, 0, 0, .06);
+      --field: #ffffff;
+      --track: rgba(0, 0, 0, .12);
+      --seg-bg: rgba(0, 0, 0, .055);
       --seg-on: #ffffff;
-      --ok: #1f9d63;
-      --err: #d6402b;
-      --focus: 0 0 0 3px rgba(47, 111, 237, .35);
-      --radius: 12px;
-      --font: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      --live: #ff453a;
+      --ok: #1f9d55;
+      --danger: #c93400;
+      --focus: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transparent);
+      --shadow: 0 1px 2px rgba(0, 0, 0, .14);
+      --wave: #c4c5cb;
+      --vp-s: 62%; --vp-l: 44%;
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+      --round: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", system-ui, sans-serif;
+      --mono: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, monospace;
     }
+    @supports (color: AccentColor) { :root { --accent: AccentColor; --accent-ink: AccentColorText; --accent-soft: color-mix(in srgb, AccentColor 12%, transparent); } }
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #17171b;
-        --card: #222228;
-        --card-line: rgba(255, 255, 255, .07);
-        --text: #ececf1;
-        --muted: #a2a2ad;
-        --faint: #74747e;
-        --accent: #6c9bff;
-        --accent-ink: #0d0d12;
-        --track: #3a3a43;
-        --seg-bg: #2c2c33;
-        --seg-on: #45454f;
-        --ok: #4fd39a;
-        --err: #ff7a66;
-        --focus: 0 0 0 3px rgba(108, 155, 255, .45);
+        --bg: #1c1d21;
+        --side: #17181b;
+        --group: #26272c;
+        --hair: rgba(255, 255, 255, .08);
+        --text: #f2f2f4;
+        --muted: #a0a1a9;
+        --faint: #6c6d75;
+        --accent: #0a84ff;
+        --accent-ink: #ffffff;
+        --accent-soft: rgba(10, 132, 255, .2);
+        --sel: rgba(255, 255, 255, .09);
+        --field: rgba(255, 255, 255, .07);
+        --track: rgba(255, 255, 255, .17);
+        --seg-bg: rgba(255, 255, 255, .08);
+        --seg-on: rgba(255, 255, 255, .2);
+        --ok: #32d74b;
+        --danger: #ff9f0a;
+        --shadow: 0 1px 2px rgba(0, 0, 0, .45);
+        --wave: #52535b;
+        --vp-s: 70%; --vp-l: 66%;
       }
+      @supports (color: AccentColor) { :root { --accent: AccentColor; --accent-ink: AccentColorText; --accent-soft: color-mix(in srgb, AccentColor 22%, transparent); } }
     }
     * { box-sizing: border-box; }
-    html { background: var(--bg); }
-    body { margin: 0; font: 14px/1.4 var(--font); color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased; }
-    main { padding: 18px 18px 8px; max-width: 640px; margin: 0 auto; }
+    html, body { height: 100%; }
+    body { margin: 0; font: 13px/1.38 var(--font); color: var(--text); -webkit-font-smoothing: antialiased; background: var(--bg); overflow: hidden; accent-color: var(--accent); }
+    button, input, select, textarea { font: inherit; color: inherit; }
+    [hidden] { display: none !important; }
+    .num, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+    .vp { display: block; flex: none; }
+    .vpw { display: inline-grid; place-items: center; flex: none; color: var(--muted); }
+    :focus-visible { outline: none; box-shadow: var(--focus); }
 
-    header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
-    h1 { font-size: 19px; font-weight: 650; margin: 0; letter-spacing: -.01em; white-space: nowrap; }
-    .pill { display: inline-flex; align-items: center; gap: 7px; max-width: 62%;
-            padding: 5px 11px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
-            background: var(--card); box-shadow: inset 0 0 0 1px var(--card-line); color: var(--muted); }
-    .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+    .app { display: grid; grid-template-columns: 208px minmax(0, 1fr); height: 100vh; }
+
+    /* ---------- sidebar ---------- */
+    .side { display: flex; flex-direction: column; gap: 2px; padding: 18px 10px 12px; overflow-y: auto; background: var(--side); border-right: 1px solid var(--hair); }
+    .brand { display: flex; align-items: center; gap: 10px; padding: 0 8px 14px; }
+    .brand .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); flex: none; }
+    .brand.live .dot { background: var(--live); animation: breathe 2.4s ease-in-out infinite; }
+    .brand b { display: block; font: 600 15px/1.15 var(--round); letter-spacing: -.01em; }
+    .brand small { display: block; font-size: 11px; color: var(--muted); margin-top: 1px; }
+    @keyframes breathe { 50% { opacity: .35; } }
+    .search { position: relative; margin-bottom: 10px; }
+    .search svg { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: var(--faint); pointer-events: none; }
+    .search input { width: 100%; height: 28px; padding: 0 8px 0 27px; border: 0; border-radius: 8px; background: var(--seg-bg); outline: none; }
+    .search input::placeholder { color: var(--faint); }
+    .search input::-webkit-search-cancel-button { -webkit-appearance: none; }
+    .nav { display: flex; align-items: center; gap: 9px; width: 100%; height: 32px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; text-align: left; cursor: pointer; }
+    .nav svg { flex: none; color: var(--muted); }
+    .nav:hover { background: var(--seg-bg); }
+    .nav[aria-current="page"] { background: var(--sel); font-weight: 600; }
+    .nav[aria-current="page"] svg { color: var(--accent); }
+    .nav .badge { margin-left: auto; min-width: 20px; padding: 0 6px; border-radius: 10px; background: var(--accent); color: var(--accent-ink); font: 600 11px/18px var(--mono); text-align: center; }
+    .grow { flex: 1; }
+    .pill { display: flex; align-items: flex-start; gap: 7px; padding: 8px; font-size: 11px; color: var(--muted); }
+    .pill .dot { width: 6px; height: 6px; margin-top: 5px; border-radius: 50%; background: var(--faint); flex: none; }
     .pill.ok .dot { background: var(--ok); }
-    .pill.ok { color: var(--text); }
-    .pill.err { color: var(--err); }
-    .pill.err .dot { background: var(--err); }
-    .pill span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pill.err { color: var(--danger); }
+    .pill.err .dot { background: var(--danger); }
+    .pill span:last-child { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; font-variant-numeric: tabular-nums; }
 
-    .preview { border-radius: 14px; padding: 12px 16px; margin-bottom: 18px; min-height: 64px;
-               display: flex; align-items: flex-end; overflow: hidden;
-               background-image: linear-gradient(135deg, #5b6b8c, #8c6b7a 55%, #6b8c7f);
-               box-shadow: inset 0 0 0 1px var(--card-line); }
-    .preview-inner { width: 100%; border-radius: 10px; padding: 8px 14px; }
-    .preview-text { font-weight: 600; line-height: 1.3; text-shadow: 0 1px 2px rgba(0, 0, 0, .8);
-                    display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
-    .preview-text .pending { opacity: .5; }
-
-    h2 { font-size: 12px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase;
-         color: var(--muted); margin: 18px 4px 7px; }
-    .card { background: var(--card); border-radius: var(--radius); box-shadow: inset 0 0 0 1px var(--card-line); }
-    .row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px 16px;
-           padding: 11px 14px; min-height: 48px; }
-    .row + .row { border-top: 1px solid var(--card-line); }
-    .row.stack { grid-template-columns: 1fr; }
-    .label { font-weight: 550; }
-    .hint { display: block; font-size: 12.5px; color: var(--muted); font-weight: 400; margin-top: 1px; }
-    .ctl { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
-
-    /* segmented control */
-    .seg { display: inline-flex; padding: 2px; border-radius: 9px; background: var(--seg-bg); gap: 2px; }
-    .seg button { font: inherit; font-size: 13px; font-weight: 550; color: var(--muted);
-                  border: 0; background: transparent; padding: 5px 12px; border-radius: 7px; cursor: pointer; }
-    .seg button[aria-checked="true"] { background: var(--seg-on); color: var(--text);
-                  box-shadow: 0 1px 2px rgba(0, 0, 0, .14); }
-    .seg button:focus-visible { outline: none; box-shadow: var(--focus); }
+    /* ---------- pages ---------- */
+    main { overflow-y: auto; padding: 28px 32px 0; position: relative; }
+    .page { display: none; max-width: 640px; margin: 0 auto; padding-bottom: 22px; animation: fade .18s ease-out; }
+    .page.on { display: block; }
+    @keyframes fade { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+    h1 { font: 600 22px/1.2 var(--round); letter-spacing: -.015em; margin: 0 0 4px; }
+    .lede { color: var(--muted); font-size: 13px; margin: 0 0 18px; }
+    .gh { font-size: 11px; font-weight: 600; letter-spacing: .02em; color: var(--muted); margin: 22px 0 7px 14px; display: flex; justify-content: space-between; align-items: center; min-height: 18px; }
+    .gh .btn { margin-right: -4px; }
+    .gf { font-size: 11px; color: var(--muted); margin: 8px 14px 0; }
+    .group { background: var(--group); border-radius: 12px; box-shadow: 0 0 0 1px var(--hair); }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; padding: 6px 14px; }
+    .row + .row { border-top: 1px solid var(--hair); margin-left: 14px; padding-left: 0; padding-right: 14px; }
+    .row.stack { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 14px; margin-left: 0; padding-left: 14px; }
+    .label { display: block; font-weight: 450; }
+    .hint { display: block; font-size: 11px; color: var(--muted); margin-top: 1px; line-height: 1.3; }
+    .ctl { display: flex; align-items: center; gap: 10px; flex: none; }
+    .grow-txt { min-width: 0; }
+    label.lbl { min-width: 0; }
 
     /* switch */
-    .switch { appearance: none; -webkit-appearance: none; margin: 0; flex: none;
-              width: 40px; height: 22px; border-radius: 999px; background: var(--track);
-              position: relative; cursor: pointer; transition: background .15s; }
-    .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
-                     border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .3); transition: transform .15s; }
+    .switch { appearance: none; -webkit-appearance: none; margin: 0; flex: none; width: 38px; height: 22px; border-radius: 11px; background: var(--track); position: relative; cursor: pointer; transition: background .15s; }
+    .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .3); transition: transform .15s; }
     .switch:checked { background: var(--accent); }
-    .switch:checked::after { transform: translateX(18px); }
-    .switch:focus-visible { outline: none; box-shadow: var(--focus); }
+    .switch:checked::after { transform: translateX(16px); }
+
+    /* segmented control */
+    .seg { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--seg-bg); gap: 1px; flex: none; }
+    .seg button { border: 0; background: transparent; padding: 3px 12px; border-radius: 6px; cursor: pointer; min-height: 22px; white-space: nowrap; }
+    .seg button[aria-checked="true"] { background: var(--seg-on); box-shadow: var(--shadow); font-weight: 550; }
 
     /* slider */
-    input[type=range] { width: 170px; accent-color: var(--accent); margin: 0; }
-    input[type=range]:focus-visible { outline: none; box-shadow: var(--focus); border-radius: 4px; }
-    output { min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+    input[type=range] { -webkit-appearance: none; appearance: none; width: 170px; height: 20px; margin: 0; background: transparent; --pct: 50%; }
+    input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--accent) var(--pct), var(--track) var(--pct)); }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; margin-top: -6px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 .5px rgba(0, 0, 0, .15), 0 1px 3px rgba(0, 0, 0, .35); }
+    input[type=range]:focus-visible { box-shadow: none; }
+    input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: var(--focus), 0 1px 3px rgba(0, 0, 0, .35); }
+    output { min-width: 50px; text-align: right; font: 12px var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); }
 
-    input[type=color] { width: 40px; height: 28px; border: 0; padding: 0; background: none; cursor: pointer; border-radius: 6px; }
+    input[type=color] { width: 40px; height: 24px; border: 0; padding: 0; background: none; cursor: pointer; border-radius: 7px; }
     input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
-    input[type=color]::-webkit-color-swatch { border: 1px solid var(--card-line); border-radius: 6px; }
-    input[type=color]:focus-visible { outline: none; box-shadow: var(--focus); }
+    input[type=color]::-webkit-color-swatch { border: 1px solid var(--hair); border-radius: 7px; }
 
-    select, textarea { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--card-line);
-                       border-radius: 8px; padding: 6px 9px; }
-    select { min-width: 190px; }
-    textarea { width: 100%; min-height: 64px; resize: vertical; }
-    select:focus-visible, textarea:focus-visible { outline: none; box-shadow: var(--focus); border-color: var(--accent); }
+    select, textarea, input.txt { background: var(--field); border: 1px solid var(--hair); border-radius: 8px; padding: 4px 9px; min-width: 0; }
+    select { min-width: 150px; height: 28px; padding-right: 4px; }
+    textarea { width: 100%; min-height: 64px; resize: vertical; font-family: var(--mono); font-size: 12px; }
+    input.txt { height: 30px; width: 100%; }
+    select:focus-visible, textarea:focus-visible, input.txt:focus-visible { border-color: var(--accent); }
+    input.txt.inline { background: transparent; border-color: transparent; font: 600 13px var(--round); padding-left: 4px; margin-left: -4px; height: 24px; }
+    input.txt.inline:hover { border-color: var(--hair); }
+    input.txt.inline:focus { background: var(--field); }
+    .chk { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; cursor: pointer; }
+    .chk input { margin: 0; }
 
-    footer { display: flex; align-items: center; justify-content: space-between; gap: 12px;
-             padding: 16px 4px 18px; color: var(--muted); font-size: 12.5px; }
-    footer code { font: 12px ui-monospace, "Cascadia Code", Consolas, monospace; color: var(--text);
-                  background: var(--card); padding: 3px 7px; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--card-line);
-                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; max-width: 100%; }
-    .cli { min-width: 0; flex: 1; }
-    .btn { font: inherit; font-weight: 600; font-size: 13px; color: var(--text); background: var(--card);
-           border: 0; box-shadow: inset 0 0 0 1px var(--card-line); border-radius: 8px; padding: 7px 12px; cursor: pointer; flex: none; }
-    .btn:hover { box-shadow: inset 0 0 0 1px var(--faint); }
-    .btn:focus-visible { outline: none; box-shadow: var(--focus); }
+    /* buttons */
+    .btn { border: 0; border-radius: 8px; padding: 4px 13px; min-height: 26px; background: var(--seg-on); box-shadow: 0 0 0 .5px var(--hair), var(--shadow); cursor: pointer; flex: none; white-space: nowrap; }
+    @media (prefers-color-scheme: dark) { .btn { background: rgba(255, 255, 255, .12); } }
+    .btn:hover { filter: brightness(.97); }
+    .btn:active { filter: brightness(.92); }
+    .btn:focus-visible { box-shadow: var(--focus); }
+    .btn.primary { background: var(--accent); color: var(--accent-ink); font-weight: 550; box-shadow: none; }
+    .btn.primary:focus-visible { box-shadow: var(--focus); }
+    .btn.danger { background: var(--danger); color: #fff; box-shadow: none; }
+    .btn.rec { background: var(--live); color: #fff; font-weight: 600; box-shadow: none; }
+    .btn.quiet { background: transparent; box-shadow: none; color: var(--accent); padding: 2px 8px; }
+    .btn.quiet.red { color: var(--danger); }
+    .btn.plain { background: transparent; box-shadow: none; color: var(--muted); }
+    .btn:disabled { opacity: .4; cursor: default; }
+    .btn kbd { font: 10px var(--mono); opacity: .6; margin-left: 6px; padding: 1px 4px; border-radius: 4px; background: var(--seg-bg); }
+    .btn.primary kbd { background: rgba(255, 255, 255, .22); opacity: .9; }
+    .iconbtn { width: 28px; height: 28px; padding: 0; display: inline-grid; place-items: center; border-radius: 50%; }
+    .meta { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
-    .eng { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 2px 12px; align-items: center;
-           padding: 11px 14px; cursor: pointer; border: 0; background: none; width: 100%; text-align: left; font: inherit; color: inherit; }
-    .eng + .eng { border-top: 1px solid var(--card-line); }
-    .eng:focus-visible { outline: none; box-shadow: var(--focus); border-radius: var(--radius); }
-    .eng .radio { width: 16px; height: 16px; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--faint); grid-row: span 2; }
-    .eng[aria-checked="true"] .radio { box-shadow: inset 0 0 0 5px var(--accent); }
-    .eng .state { font-size: 12.5px; color: var(--muted); grid-row: span 2; text-align: right; white-space: nowrap; }
+    /* suggestion chips */
+    .chips { display: flex; flex-wrap: wrap; gap: 7px; }
+    .sug { display: inline-flex; align-items: center; gap: 7px; border: 0; border-radius: 999px; padding: 4px 12px 4px 6px; cursor: pointer; background: var(--seg-bg); font: 600 13px var(--round); }
+    .sug:hover { background: var(--sel); }
+    .sug[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+    .sug .pct { font: 11px var(--mono); font-variant-numeric: tabular-nums; opacity: .75; }
+    .sug.best:not([aria-pressed="true"]) { box-shadow: inset 0 0 0 1.5px var(--accent); }
+
+    /* review card */
+    .review { padding: 16px 18px 14px; display: grid; gap: 14px; animation: slidein .24s cubic-bezier(.2, .8, .2, 1); }
+    @keyframes slidein { from { opacity: 0; transform: translateX(22px); } to { opacity: 1; transform: none; } }
+    .rv-top { display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 600; letter-spacing: .02em; color: var(--muted); }
+    .rv-top .nav2 { display: flex; align-items: center; gap: 4px; }
+    .rv-head { display: flex; align-items: center; gap: 18px; }
+    .rv-head .vpw { color: var(--muted); }
+    .rv-title { font: 600 22px/1.15 var(--round); letter-spacing: -.015em; }
+    .rv-q { font: 600 15px var(--round); margin: 2px 0 -4px; }
+    .rv-name { display: flex; gap: 8px; }
+    .rv-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid var(--hair); }
+    .picker { display: grid; gap: 2px; padding: 6px; border-radius: 10px; background: var(--seg-bg); }
+    .picker button { display: flex; align-items: center; gap: 10px; border: 0; background: transparent; padding: 4px 8px; border-radius: 7px; cursor: pointer; text-align: left; }
+    .picker button:hover { background: var(--sel); }
+    .player { display: flex; align-items: center; gap: 10px; }
+    .player .play { width: 32px; height: 32px; border-radius: 50%; border: 0; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; cursor: pointer; flex: none; }
+    .player .play:disabled { background: var(--track); cursor: default; }
+    .wavebox { flex: 1; height: 40px; border-radius: 8px; background: var(--seg-bg); position: relative; min-width: 0; }
+    .wavebox canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: pointer; }
+    .player .time { font: 11px var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); min-width: 78px; text-align: right; }
+
+    /* voice list rows */
+    .vrow { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 8px 14px; border: 0; background: none; text-align: left; cursor: pointer; }
+    .vrow + .vrow { border-top: 1px solid var(--hair); }
+    .vrow:hover { background: var(--seg-bg); }
+    .vrow[aria-current="true"] { background: var(--accent-soft); }
+    .vrow:first-child { border-radius: 12px 12px 0 0; } .vrow:last-child { border-radius: 0 0 12px 12px; } .vrow:only-child { border-radius: 12px; }
+    .vrow .t { font: 600 13px var(--round); }
+    .vrow .grow-txt { flex: 1; }
+    .vrow .guess { font-size: 11px; color: var(--muted); }
+    .done-card { text-align: center; padding: 30px 24px 28px; }
+
+    #live .group { margin-bottom: 4px; }
+    .empty { text-align: center; padding: 34px 28px 30px; color: var(--muted); }
+    .empty .vpw { margin-bottom: 12px; }
+    .empty b { display: block; color: var(--text); font: 600 15px var(--round); margin-bottom: 4px; }
+    .empty span.d { display: block; font-size: 13px; margin: 0 auto 14px; max-width: 360px; }
+    .quiet-empty { padding: 14px; color: var(--muted); font-size: 12px; }
+
+    /* people */
+    .prow { padding: 8px 14px; }
+    .prow + .prow { border-top: 1px solid var(--hair); }
+    .phead { display: flex; align-items: center; gap: 12px; min-height: 40px; }
+    .phead .grow-txt { flex: 1; }
+    .chev { transition: transform .15s; color: var(--muted); }
+    [aria-expanded="true"] > .chev { transform: rotate(90deg); }
+    .sigs { margin: 6px 0 4px 48px; border-top: 1px solid var(--hair); }
+    .sig { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 5px 0; font: 11px var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); }
+    .sig + .sig { border-top: 1px solid var(--hair); }
+
+    /* engines */
+    .eng { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 2px 12px; align-items: center; padding: 11px 14px; cursor: pointer; border: 0; background: none; width: 100%; text-align: left; border-radius: 12px; }
+    .eng + .eng { border-top: 1px solid var(--hair); border-radius: 0; }
+    .eng .tick { width: 18px; height: 18px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--faint); grid-row: span 2; display: grid; place-items: center; color: transparent; }
+    .eng[aria-checked="true"] .tick { background: var(--accent); box-shadow: none; color: var(--accent-ink); }
+    .eng .nm { font: 600 13px var(--round); }
+    .eng .state { font: 11px var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); text-align: right; white-space: nowrap; }
     .eng .state.get { color: var(--accent); font-weight: 600; }
-    .eng .bar { grid-column: 2 / 4; height: 4px; border-radius: 2px; background: var(--track); overflow: hidden; }
+    .eng .meters { grid-column: 3; grid-row: 2; display: flex; gap: 12px; justify-self: end; }
+    .mt { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--muted); }
+    .mt i { display: inline-block; width: 7px; height: 4px; border-radius: 1px; background: var(--track); margin-left: -2px; }
+    .mt i.on { background: var(--text); opacity: .75; }
+    .eng .bar { grid-column: 2 / 4; height: 4px; border-radius: 2px; background: var(--track); overflow: hidden; margin-top: 6px; }
     .eng .bar > i { display: block; height: 100%; background: var(--accent); width: 0; }
     body.streaming .rolling-only { display: none; }
-    .head-right { display: flex; align-items: center; gap: 8px; min-width: 0; justify-content: flex-end; }
-    .head-right .pill { max-width: 210px; }
-    dialog { border: 0; border-radius: 14px; padding: 20px 22px 16px; max-width: 360px; color: var(--text); background: var(--card);
-             box-shadow: 0 18px 50px rgba(0, 0, 0, .35), inset 0 0 0 1px var(--card-line); }
-    dialog::backdrop { background: rgba(0, 0, 0, .35); }
-    dialog h3 { margin: 0 0 6px; font-size: 16px; }
-    dialog p { margin: 0 0 16px; color: var(--muted); }
-    .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; }
-    .btn.danger { background: var(--err); color: #fff; box-shadow: none; }
-    @media (max-width: 440px) {
-      input[type=range] { width: 120px; }
-      select { min-width: 140px; }
+
+    /* appearance preview: the real overlay's CSS, scoped */
+    .stage { position: sticky; top: -1px; z-index: 3; border-radius: 14px; padding: 26px 18px 18px; background: #55627d; box-shadow: 0 0 0 1px var(--hair), 0 8px 22px rgba(0, 0, 0, .12); overflow: hidden; }
+    .stage::before { content: ""; position: absolute; left: 16px; right: 16px; top: 14px; height: 48px; border-radius: 8px; background: rgba(255, 255, 255, .1); }
+    .pv { position: relative; --vp-s: 78%; --vp-l: 70%; --mic: #fff3b0; --sys: #b8f4ff; --pv-lines: 3;
+          font-family: var(--pv-font); font-size: var(--pv-size); font-weight: 600; line-height: 1.34; letter-spacing: -.003em; color: var(--pv-fg);
+          background: var(--pv-bg); -webkit-backdrop-filter: blur(24px) saturate(1.4); backdrop-filter: blur(24px) saturate(1.4); border-radius: 18px; padding: 14px 24px 16px;
+          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .09); text-shadow: 0 1px 2px rgba(0, 0, 0, .35); -webkit-font-smoothing: antialiased; }
+    .pv p { margin: 0; }
+    .pv .d1 { opacity: .7; }
+    .pv .pending { opacity: .55; }
+    .pv .who { display: inline-flex; align-items: center; gap: .55em; font: 650 .64em/1 var(--round); font-variant-caps: all-small-caps; letter-spacing: .05em; padding: .4em .85em .4em .5em; margin-right: .75em; border-radius: 999px; vertical-align: .2em; text-shadow: none;
+      color: var(--tint); background: color-mix(in srgb, var(--tint) 17%, transparent); }
+    .pv .who .vp { width: 18px; height: 18px; }
+    .pv .who.you { --tint: var(--pv-mic); } .pv .who.you .vp { display: none; }
+    .pv .who.you::before { content: ""; width: .55em; height: .55em; border-radius: 50%; background: var(--pv-mic); }
+    .pv .src-mic { color: var(--pv-mic); } .pv .src-system { color: var(--pv-sys); }
+
+    /* footer bar */
+    .bar-foot { position: sticky; bottom: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 640px; margin: 0 auto;
+                padding: 10px 0 12px; color: var(--muted); font-size: 11px; background: var(--bg); box-shadow: 0 -1px 0 var(--hair), -40px 0 0 var(--bg), 40px 0 0 var(--bg); }
+    .bar-foot code { font: 11px var(--mono); color: var(--text); background: var(--seg-bg); padding: 2px 6px; border-radius: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; max-width: 100%; vertical-align: bottom; }
+    .cli { min-width: 0; flex: 1; }
+
+    /* toast */
+    #toast { position: fixed; left: 50%; bottom: 58px; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: 10px; padding: 7px 8px 7px 14px; border-radius: 999px;
+             background: #2b2c31; color: #f2f2f4; box-shadow: 0 6px 20px rgba(0, 0, 0, .3), 0 0 0 1px rgba(255, 255, 255, .08); font-size: 12px; }
+    #toast .btn { background: rgba(255, 255, 255, .14); color: #fff; box-shadow: none; min-height: 24px; padding: 2px 12px; }
+    #toast i { position: absolute; left: 14px; right: 14px; bottom: 0; height: 2px; background: rgba(255, 255, 255, .3); transform-origin: left; animation: drain 5s linear forwards; }
+    @keyframes drain { to { transform: scaleX(0); } }
+
+    /* sheets */
+    dialog { border: 0; border-radius: 16px; padding: 22px 24px 18px; width: 400px; max-width: calc(100vw - 40px); color: var(--text); background: var(--group); box-shadow: 0 20px 56px rgba(0, 0, 0, .35), 0 0 0 1px var(--hair); }
+    dialog::backdrop { background: rgba(0, 0, 0, .3); }
+    dialog h3 { margin: 0 0 4px; font: 600 15px var(--round); }
+    dialog p { margin: 0 0 14px; color: var(--muted); font-size: 12px; }
+    .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+    .sheet-body { display: grid; gap: 14px; }
+    .meter { height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
+    .meter i { display: block; height: 100%; width: 0; background: var(--text); opacity: .7; transition: width .08s linear; }
+    .ringbox { position: relative; width: 108px; height: 108px; margin: 0 auto; }
+    .ringbox svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+    .ringbox .count { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; font: 600 28px/1 var(--mono); font-variant-numeric: tabular-nums; }
+    .ringbox .count small { font: 11px var(--font); color: var(--muted); margin-top: 3px; display: block; text-align: center; }
+    .err-line { color: var(--danger); font-size: 12px; margin: 0; }
+    .err-line:empty { display: none; }
+    .rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--live); animation: breathe 1s infinite; }
+    input[type=file] { font-size: 12px; max-width: 100%; }
+
+    @media (max-width: 760px) { .app { grid-template-columns: 56px minmax(0, 1fr); } .nav span, .brand div, .search, .pill span:last-child, .nav .badge { display: none; } .nav { justify-content: center; } .brand { justify-content: center; } }
+    @media (prefers-reduced-motion: reduce) {
+      .page, .review { animation: none; }
+      .switch, .switch::after, .chev, .meter i { transition: none; }
+      .rec-dot, .brand.live .dot, #toast i { animation: none; }
     }
-    @media (prefers-reduced-motion: reduce) { .switch, .switch::after { transition: none; } }
   </style>
 </head>
 <body>
-<main>
-  <header>
-    <h1>RT Captions</h1>
-    <div class="head-right">
-      <div class="pill" id="pill" role="status" aria-live="polite"><span class="dot"></span><span id="pill-text">Starting…</span></div>
-      <button type="button" class="btn" id="to-tray" title="Hide this window. Captions keep running; reopen from the tray icon.">Minimize to tray</button>
-    </div>
-  </header>
+<div class="app">
+  <nav class="side" aria-label="Settings sections">
+    <div class="brand" id="brand"><span class="dot"></span><div><b>RT Captions</b><small id="brand-state">Starting…</small></div></div>
+    <label class="search">
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="6.5" cy="6.5" r="4.5"/><path d="M10 10l4 4"/></svg>
+      <input type="search" id="q" placeholder="Search" aria-label="Search people and voices" autocomplete="off">
+    </label>
+    <button type="button" class="nav" data-page="captions"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="3" width="13" height="10" rx="2.5"/><path d="M4.5 7.5h3M9 7.5h2.5M4.5 10h1.5M7.5 10h4"/></svg><span>Captions</span></button>
+    <button type="button" class="nav" data-page="voices"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 8v0M4.5 5v6M7 2.5v11M9.5 4.5v7M12 6.5v3M14 8v0"/></svg><span>Voices</span><b class="badge" id="badge" hidden></b></button>
+    <button type="button" class="nav" data-page="people"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="5.5" r="2.7"/><path d="M2.8 13.5c.5-2.6 2.5-4 5.2-4s4.7 1.4 5.2 4"/></svg><span>People</span></button>
+    <button type="button" class="nav" data-page="engine"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="8" height="8" rx="1.8"/><path d="M6.5 1.8v2.2M9.5 1.8v2.2M6.5 12v2.2M9.5 12v2.2M1.8 6.5H4M1.8 9.5H4M12 6.5h2.2M12 9.5h2.2"/></svg><span>Engine</span></button>
+    <button type="button" class="nav" data-page="appearance"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12.5l3-9 3 9M4 9.5h4M11 6.5h3M12.5 6.5v6"/></svg><span>Appearance</span></button>
+    <div class="grow"></div>
+    <div class="pill" id="pill" role="status" aria-live="polite"><span class="dot"></span><span id="pill-text">Starting…</span></div>
+    <button type="button" class="btn" id="to-tray" title="Hide this window. Captions keep running; reopen from the tray icon.">Minimize to tray</button>
+  </nav>
 
-  <div class="preview" aria-label="Caption preview">
-    <div class="preview-inner" id="preview"><div class="preview-text" id="preview-text"></div></div>
-  </div>
+  <main id="main">
+    <!-- ================= Captions ================= -->
+    <section class="page" id="p-captions" aria-labelledby="h-captions">
+      <h1 id="h-captions">Captions</h1>
+      <p class="lede">What to caption, and how the captions window behaves.</p>
 
-  <h2>Speech engine</h2>
-  <div class="card" id="engines" role="radiogroup" aria-label="Speech engine"></div>
-
-  <div class="card" style="margin-top:10px">
-    <div class="row">
-      <div><span class="label" id="l-mode">Performance</span><span class="hint">More threads: faster on chips with many fast cores, more battery</span></div>
-      <div class="seg" role="radiogroup" aria-labelledby="l-mode" data-key="audio.mode">
-        <button type="button" role="radio" data-value="low">Low</button>
-        <button type="button" role="radio" data-value="balanced">Balanced</button>
-        <button type="button" role="radio" data-value="performance">Performance</button>
+      <div class="gh">Source</div>
+      <div class="group">
+        <div class="row">
+          <div><span class="label" id="l-source">Listen to</span><span class="hint">System audio captions calls and videos</span></div>
+          <div class="seg" role="radiogroup" aria-labelledby="l-source" data-key="audio.source">
+            <button type="button" role="radio" data-value="mic">Mic</button>
+            <button type="button" role="radio" data-value="system">System</button>
+            <button type="button" role="radio" data-value="both">Both</button>
+          </div>
+        </div>
       </div>
-    </div>
-    <div class="row">
-      <div><span class="label" id="l-lang">Language</span><span class="hint">Nemotron only; the other engines are English-only</span></div>
-      <div class="seg" role="radiogroup" aria-labelledby="l-lang" data-key="audio.language">
-        <button type="button" role="radio" data-value="en">English</button>
-        <button type="button" role="radio" data-value="hi">Hindi</button>
+
+      <div class="gh">Captions window</div>
+      <div class="group">
+        <div class="row">
+          <label class="lbl" for="overlay"><span class="label">Show captions</span><span class="hint">The floating window over your call</span></label>
+          <input type="checkbox" class="switch" role="switch" id="overlay" data-key="overlay">
+        </div>
+        <div class="row">
+          <label class="lbl" for="autohide"><span class="label">Only show when someone speaks</span><span class="hint">Stays out of the way during silence</span></label>
+          <input type="checkbox" class="switch" role="switch" id="autohide" data-key="auto_hide">
+        </div>
+        <div class="row">
+          <label class="lbl" for="hideafter"><span class="label">Hide after quiet for</span></label>
+          <div class="ctl"><input type="range" id="hideafter" data-key="style.hide_after_s" min="2" max="20" step="1" data-fmt="s"><output for="hideafter"></output></div>
+        </div>
+        <div class="row">
+          <label class="lbl" for="clickthrough"><span class="label">Click-through</span><span class="hint">Off lets you drag the window and name speakers</span></label>
+          <input type="checkbox" class="switch" role="switch" id="clickthrough" data-key="click_through">
+        </div>
       </div>
-    </div>
-  </div>
 
-  <h2>Audio</h2>
-  <div class="card">
-    <div class="row">
-      <div><span class="label" id="l-source">Listen to</span><span class="hint">System audio captions calls and videos</span></div>
-      <div class="seg" role="radiogroup" aria-labelledby="l-source" data-key="audio.source">
-        <button type="button" role="radio" data-value="mic">Mic</button>
-        <button type="button" role="radio" data-value="system">System</button>
-        <button type="button" role="radio" data-value="both">Both</button>
+      <div class="gh">Speaker labels</div>
+      <div class="group">
+        <div class="row">
+          <label class="lbl" for="speakers"><span class="label">Speaker labels</span><span class="hint">Tell voices apart. Click a name on the captions, or use Voices.</span></label>
+          <input type="checkbox" class="switch" role="switch" id="speakers" data-key="audio.speakers">
+        </div>
+        <div class="row">
+          <label class="lbl" for="spkthr"><span class="label">Match strictness</span><span class="hint">Higher is stricter; the rest show as Voice 1, 2…</span></label>
+          <div class="ctl"><input type="range" id="spkthr" data-key="audio.speaker_threshold" min="0.4" max="0.9" step="0.05" data-fmt="raw"><output for="spkthr"></output></div>
+        </div>
       </div>
-    </div>
-    <div class="row">
-      <label for="rnnoise"><span class="label">Noise suppression</span><span class="hint">Cleans up fans, typing and room noise</span></label>
-      <input type="checkbox" class="switch" role="switch" id="rnnoise" data-key="audio.rnnoise">
-    </div>
-    <div class="row stack">
-      <label for="keywords"><span class="label">Keywords</span><span class="hint">Names and terms to recognise, one per line. e.g. Claude, Fathom, Intelehealth</span></label>
-      <textarea id="keywords" data-key="audio.keywords" spellcheck="false" placeholder="Claude&#10;Fathom&#10;Intelehealth"></textarea>
-    </div>
-  </div>
+    </section>
 
-  <h2>Speed &amp; accuracy</h2>
-  <div class="card">
-    <div class="row rolling-only">
-      <div><span class="label" id="l-window">Listening window</span><span class="hint">Shorter is faster</span></div>
-      <div class="seg" role="radiogroup" aria-labelledby="l-window" data-key="audio.stream.window_s" data-num>
-        <button type="button" role="radio" data-value="2">2 s</button>
-        <button type="button" role="radio" data-value="3">3 s</button>
-        <button type="button" role="radio" data-value="4">4 s</button>
-        <button type="button" role="radio" data-value="5">5 s</button>
+    <!-- ================= Voices ================= -->
+    <section class="page" id="p-voices" aria-labelledby="h-voices">
+      <h1 id="h-voices">Voices</h1>
+      <p class="lede" id="voices-lede">Voices heard in meetings that nobody has named yet.</p>
+      <div id="review-box"></div>
+      <div id="inbox"></div>
+      <div id="live"></div>
+      <p class="gf" id="voices-note">Unnamed voices and their audio are deleted after 30 days. Everything stays on this Mac.</p>
+    </section>
+
+    <!-- ================= People ================= -->
+    <section class="page" id="p-people" aria-labelledby="h-people">
+      <h1 id="h-people">People</h1>
+      <p class="lede">Named voices. Several signatures per person keep them recognised on a bad line or another mic.</p>
+      <div class="gh"><span id="people-count">People</span><button type="button" class="btn quiet" id="add-person">Add person…</button></div>
+      <div class="group" id="people"></div>
+    </section>
+
+    <!-- ================= Engine ================= -->
+    <section class="page" id="p-engine" aria-labelledby="h-engine">
+      <h1 id="h-engine">Engine</h1>
+      <p class="lede">The speech model and how hard it works.</p>
+
+      <div class="gh">Speech engine</div>
+      <div class="group" id="engines" role="radiogroup" aria-label="Speech engine"></div>
+
+      <div class="gh">Recognition</div>
+      <div class="group">
+        <div class="row">
+          <div><span class="label" id="l-mode">Performance</span><span class="hint">More threads: faster, but more battery</span></div>
+          <div class="seg" role="radiogroup" aria-labelledby="l-mode" data-key="audio.mode">
+            <button type="button" role="radio" data-value="low">Low</button>
+            <button type="button" role="radio" data-value="balanced">Balanced</button>
+            <button type="button" role="radio" data-value="performance">Performance</button>
+          </div>
+        </div>
+        <div class="row">
+          <div><span class="label" id="l-lang">Language</span><span class="hint">Nemotron only; the other engines are English-only</span></div>
+          <div class="seg" role="radiogroup" aria-labelledby="l-lang" data-key="audio.language">
+            <button type="button" role="radio" data-value="en">English</button>
+            <button type="button" role="radio" data-value="hi">Hindi</button>
+          </div>
+        </div>
+        <div class="row">
+          <label class="lbl" for="rnnoise"><span class="label">Noise suppression</span><span class="hint">Cleans up fans, typing and room noise</span></label>
+          <input type="checkbox" class="switch" role="switch" id="rnnoise" data-key="audio.rnnoise">
+        </div>
+        <div class="row">
+          <label class="lbl" for="skipsilence"><span class="label">Skip silence</span><span class="hint">Saves battery, but can miss quiet or distant voices</span></label>
+          <input type="checkbox" class="switch" role="switch" id="skipsilence" data-key="audio.skip_silence">
+        </div>
+        <div class="row stack">
+          <label class="lbl" for="keywords"><span class="label">Keywords</span><span class="hint">Names and terms to recognise, one per line</span></label>
+          <textarea id="keywords" data-key="audio.keywords" spellcheck="false" placeholder="Intelehealth&#10;Dr. Nikesh&#10;Shaurya"></textarea>
+        </div>
       </div>
-    </div>
-    <div class="row rolling-only">
-      <div><span class="label" id="l-hop">Update every</span><span class="hint">Slower uses less battery</span></div>
-      <div class="seg" role="radiogroup" aria-labelledby="l-hop" data-key="audio.stream.hop_s" data-num>
-        <button type="button" role="radio" data-value="0.15">150 ms</button>
-        <button type="button" role="radio" data-value="0.25">250 ms</button>
-        <button type="button" role="radio" data-value="0.4">400 ms</button>
-        <button type="button" role="radio" data-value="0.5">500 ms</button>
+
+      <div class="gh">Speed &amp; accuracy</div>
+      <div class="group">
+        <div class="row rolling-only">
+          <div><span class="label" id="l-window">Listening window</span><span class="hint">Shorter is faster</span></div>
+          <div class="seg" role="radiogroup" aria-labelledby="l-window" data-key="audio.stream.window_s" data-num>
+            <button type="button" role="radio" data-value="2">2 s</button>
+            <button type="button" role="radio" data-value="3">3 s</button>
+            <button type="button" role="radio" data-value="4">4 s</button>
+            <button type="button" role="radio" data-value="5">5 s</button>
+          </div>
+        </div>
+        <div class="row rolling-only">
+          <div><span class="label" id="l-hop">Update every</span><span class="hint">Slower uses less battery</span></div>
+          <div class="seg" role="radiogroup" aria-labelledby="l-hop" data-key="audio.stream.hop_s" data-num>
+            <button type="button" role="radio" data-value="0.15">150 ms</button>
+            <button type="button" role="radio" data-value="0.25">250 ms</button>
+            <button type="button" role="radio" data-value="0.4">400 ms</button>
+            <button type="button" role="radio" data-value="0.5">500 ms</button>
+          </div>
+        </div>
+        <div class="row rolling-only">
+          <label class="lbl" for="finalize"><span class="label">Finalize pending words after</span><span class="hint">Grey words turn solid if unchanged this long</span></label>
+          <div class="ctl"><input type="range" id="finalize" data-key="audio.stream.finalize_s" min="1" max="4" step="0.5" data-fmt="s"><output for="finalize"></output></div>
+        </div>
+        <div class="row">
+          <label class="lbl" for="vad"><span class="label">Speech sensitivity</span><span class="hint">Lower hears quieter voices; higher ignores noise</span></label>
+          <div class="ctl"><input type="range" id="vad" data-key="audio.stream.vad_threshold" min="0.002" max="0.05" step="0.001" data-fmt="raw"><output for="vad"></output></div>
+        </div>
       </div>
-    </div>
-    <div class="row rolling-only">
-      <label for="finalize"><span class="label">Finalize pending words after</span><span class="hint">Grey words turn solid if unchanged this long</span></label>
-      <div class="ctl"><input type="range" id="finalize" data-key="audio.stream.finalize_s" min="1" max="4" step="0.5" data-fmt="s"><output for="finalize"></output></div>
-    </div>
-    <div class="row">
-      <label for="vad"><span class="label">Speech sensitivity</span><span class="hint">Lower picks up quieter voices; higher ignores more noise</span></label>
-      <div class="ctl"><input type="range" id="vad" data-key="audio.stream.vad_threshold" min="0.002" max="0.05" step="0.001" data-fmt="raw"><output for="vad"></output></div>
-    </div>
-  </div>
+    </section>
 
-  <h2>Captions window</h2>
-  <div class="card">
-    <div class="row">
-      <label for="overlay"><span class="label">Show captions</span></label>
-      <input type="checkbox" class="switch" role="switch" id="overlay" data-key="overlay">
-    </div>
-    <div class="row">
-      <label for="autohide"><span class="label">Only show when someone speaks</span><span class="hint">Stays out of the way during silence</span></label>
-      <input type="checkbox" class="switch" role="switch" id="autohide" data-key="auto_hide">
-    </div>
-    <div class="row">
-      <label for="hideafter"><span class="label">Hide after quiet for</span></label>
-      <div class="ctl"><input type="range" id="hideafter" data-key="style.hide_after_s" min="2" max="20" step="1" data-fmt="s"><output for="hideafter"></output></div>
-    </div>
-    <div class="row">
-      <label for="clickthrough"><span class="label">Click-through</span><span class="hint">Click windows under the captions. Turn off to drag them.</span></label>
-      <input type="checkbox" class="switch" role="switch" id="clickthrough" data-key="click_through">
-    </div>
-  </div>
+    <!-- ================= Appearance ================= -->
+    <section class="page" id="p-appearance" aria-labelledby="h-appearance">
+      <h1 id="h-appearance">Appearance</h1>
+      <p class="lede">How the captions look. The preview is the real thing and follows what you change.</p>
+      <div class="stage" aria-label="Caption preview"><div class="pv" id="pv"></div></div>
 
-  <h2>Appearance</h2>
-  <div class="card">
-    <div class="row">
-      <label for="font"><span class="label">Font</span></label>
-      <select id="font" data-key="style.font">
-        <option value='Segoe UI Variable Text, Segoe UI, -apple-system, system-ui, sans-serif'>System</option>
-        <option value='Atkinson Hyperlegible, Verdana, Geneva, sans-serif'>Hyperlegible</option>
-        <option value='Verdana, Geneva, sans-serif'>Wide</option>
-        <option value='Georgia, Cambria, "Times New Roman", serif'>Serif</option>
-        <option value='Cascadia Code, "SF Mono", Menlo, Consolas, monospace'>Monospace</option>
-      </select>
-    </div>
-    <div class="row">
-      <label for="size"><span class="label">Text size</span></label>
-      <div class="ctl"><input type="range" id="size" data-key="style.size" min="16" max="72" step="1" data-fmt="px"><output for="size"></output></div>
-    </div>
-    <div class="row">
-      <label for="lines"><span class="label">Lines</span></label>
-      <div class="ctl"><input type="range" id="lines" data-key="style.lines" min="1" max="6" step="1" data-fmt="raw"><output for="lines"></output></div>
-    </div>
-    <div class="row">
-      <label for="fg"><span class="label">Text color</span></label>
-      <input type="color" id="fg" data-key="style.fg">
-    </div>
-    <div class="row">
-      <label for="miccolor"><span class="label">Your voice (Both)</span><span class="hint">Text color for the microphone</span></label>
-      <input type="color" id="miccolor" data-key="style.mic_color">
-    </div>
-    <div class="row">
-      <label for="syscolor"><span class="label">Others (Both)</span><span class="hint">Text color for system audio</span></label>
-      <input type="color" id="syscolor" data-key="style.system_color">
-    </div>
-    <div class="row">
-      <label for="bg"><span class="label">Background color</span></label>
-      <input type="color" id="bg" data-key="style.bg">
-    </div>
-    <div class="row">
-      <label for="opacity"><span class="label">Background opacity</span></label>
-      <div class="ctl"><input type="range" id="opacity" data-key="style.opacity" min="0" max="1" step="0.05" data-fmt="%"><output for="opacity"></output></div>
-    </div>
-  </div>
+      <div class="gh">Text</div>
+      <div class="group">
+        <div class="row">
+          <label class="lbl" for="font"><span class="label">Font</span></label>
+          <select id="font" data-key="style.font">
+            <option value='Segoe UI Variable Text, Segoe UI, -apple-system, system-ui, sans-serif'>System</option>
+            <option value='Atkinson Hyperlegible, Verdana, Geneva, sans-serif'>Hyperlegible</option>
+            <option value='Verdana, Geneva, sans-serif'>Wide</option>
+            <option value='Georgia, Cambria, "Times New Roman", serif'>Serif</option>
+            <option value='Cascadia Code, "SF Mono", Menlo, Consolas, monospace'>Monospace</option>
+          </select>
+        </div>
+        <div class="row">
+          <label class="lbl" for="size"><span class="label">Text size</span></label>
+          <div class="ctl"><input type="range" id="size" data-key="style.size" min="16" max="72" step="1" data-fmt="px"><output for="size"></output></div>
+        </div>
+        <div class="row">
+          <label class="lbl" for="lines"><span class="label">Lines</span></label>
+          <div class="ctl"><input type="range" id="lines" data-key="style.lines" min="1" max="6" step="1" data-fmt="raw"><output for="lines"></output></div>
+        </div>
+      </div>
 
-  <footer>
-    <div class="cli">Every setting is scriptable: <code id="cli">rt-captions set &lt;key&gt; &lt;value&gt;</code></div>
-    <button type="button" class="btn" id="reset">Reset to defaults</button>
-  </footer>
-</main>
+      <div class="gh">Colours</div>
+      <div class="group">
+        <div class="row">
+          <label class="lbl" for="fg"><span class="label">Text color</span></label>
+          <input type="color" id="fg" data-key="style.fg">
+        </div>
+        <div class="row">
+          <label class="lbl" for="miccolor"><span class="label">Your voice (Both)</span><span class="hint">Text color for the microphone</span></label>
+          <input type="color" id="miccolor" data-key="style.mic_color">
+        </div>
+        <div class="row">
+          <label class="lbl" for="syscolor"><span class="label">Others (Both)</span><span class="hint">Text color for system audio</span></label>
+          <input type="color" id="syscolor" data-key="style.system_color">
+        </div>
+        <div class="row">
+          <label class="lbl" for="bg"><span class="label">Background color</span></label>
+          <input type="color" id="bg" data-key="style.bg">
+        </div>
+        <div class="row">
+          <label class="lbl" for="opacity"><span class="label">Background opacity</span></label>
+          <div class="ctl"><input type="range" id="opacity" data-key="style.opacity" min="0" max="1" step="0.05" data-fmt="%"><output for="opacity"></output></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="bar-foot">
+      <div class="cli">Every setting is scriptable: <code id="cli">rt-captions set &lt;key&gt; &lt;value&gt;</code></div>
+      <button type="button" class="btn" id="reset">Reset to defaults</button>
+    </div>
+  </main>
+</div>
+
+<datalist id="people-names"></datalist>
+<div id="toast" hidden role="status"></div>
+
+<!-- confirm sheet -->
+<dialog id="confirm-dlg" aria-labelledby="cf-title">
+  <h3 id="cf-title"></h3>
+  <p id="cf-body"></p>
+  <div class="dlg-actions">
+    <button type="button" class="btn" id="cf-cancel" autofocus>Cancel</button>
+    <button type="button" class="btn danger" id="cf-ok"></button>
+  </div>
+</dialog>
+
+<!-- add voice sample sheet -->
+<dialog id="sample-dlg" aria-labelledby="sd-title">
+  <h3 id="sd-title">Add voice sample</h3>
+  <p id="sd-sub">Another sample of the same voice makes recognition more reliable.</p>
+  <div class="sheet-body">
+    <input type="text" class="txt" id="sd-name" list="people-names" placeholder="Name" aria-label="Name" autocomplete="off">
+    <div class="seg" id="sd-mode" role="radiogroup" aria-label="How to add the sample" style="justify-self:start">
+      <button type="button" role="radio" data-value="record" aria-checked="true">Record</button>
+      <button type="button" role="radio" data-value="import" aria-checked="false">Import file</button>
+    </div>
+    <div id="sd-rec" class="sheet-body">
+      <div id="sd-pick" style="display:flex;align-items:center;justify-content:space-between">
+        <span class="label">Length</span>
+        <div class="seg" id="sd-len" role="radiogroup" aria-label="Recording length">
+          <button type="button" role="radio" data-value="5" aria-checked="false">5 s</button>
+          <button type="button" role="radio" data-value="10" aria-checked="true">10 s</button>
+          <button type="button" role="radio" data-value="20" aria-checked="false">20 s</button>
+        </div>
+      </div>
+      <div id="sd-live" hidden class="sheet-body">
+        <div class="ringbox">
+          <svg width="108" height="108" viewBox="0 0 108 108" aria-hidden="true"><circle cx="54" cy="54" r="48" fill="none" stroke="var(--track)" stroke-width="5"/><circle id="sd-ring" cx="54" cy="54" r="48" fill="none" stroke="var(--live)" stroke-width="5" stroke-linecap="round" stroke-dasharray="301.6" stroke-dashoffset="0"/></svg>
+          <div class="count"><div><span id="sd-count">10</span><small><span class="rec-dot"></span> recording</small></div></div>
+        </div>
+        <div class="meter" aria-hidden="true"><i id="sd-meter"></i></div>
+      </div>
+      <p style="margin:0" id="sd-tip">Speak normally for the whole time. Use the microphone you caption with.</p>
+    </div>
+    <div id="sd-imp" class="sheet-body" hidden>
+      <input type="file" id="sd-file" accept="audio/wav,.wav" aria-label="WAV file">
+      <p style="margin:0">A WAV recording of just this person. Any sample rate; the first minute is used.</p>
+    </div>
+    <p class="err-line" id="sd-err" role="alert"></p>
+  </div>
+  <div class="dlg-actions">
+    <button type="button" class="btn" id="sd-cancel">Cancel</button>
+    <button type="button" class="btn rec" id="sd-go">Record</button>
+  </div>
+</dialog>
+
 <dialog id="quit-dlg" aria-labelledby="quit-title">
   <h3 id="quit-title">Quit RT Captions?</h3>
   <p>This closes the app completely: captions stop on every source and the tray icon goes away. To keep captions running, use Minimize to tray instead.</p>
@@ -316,8 +585,8 @@
   const { invoke } = window.__TAURI__.core;
   const { listen } = window.__TAURI__.event;
   const $ = id => document.getElementById(id);
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   const controls = [...document.querySelectorAll("[data-key]")];
-  const SAMPLE = "Captions appear here as people speak.";
   let settings = null;
 
   const get = (o, path) => path.split(".").reduce((a, k) => (a == null ? a : a[k]), o);
@@ -334,8 +603,68 @@
     }
   };
   const cliValue = v => typeof v === "string" ? JSON.stringify(v) : String(v);
+    // ---------- voiceprint: a glyph drawn from the voice signature (24 radial bars; hue from the vector) ----------
+    const VP = (() => {
+      const hash = s => { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.codePointAt(0), 16777619) >>> 0; return h; };
+      const synth = seed => { let x = hash(seed) || 1; return Array.from({ length: 24 }, () => { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; return x / 4294967296 - .5; }); };
+      const centred = p => { const m = p.reduce((a, b) => a + b, 0) / p.length; return p.map(v => v - m); };
+      const hueOf = p => { let a = 0, b = 0; centred(p).forEach((v, i) => { const t = i / p.length * 2 * Math.PI; a += v * Math.cos(t); b += v * Math.sin(t); }); return ((Math.atan2(b, a) * 180 / Math.PI) % 360 + 360) % 360; };
+      const norm = p => { const c = centred(p), lo = Math.min(...c), hi = Math.max(...c), d = (hi - lo) || 1; return c.map(v => (v - lo) / d); };
+      const have = p => Array.isArray(p) && p.length >= 24;
+      const color = h => `hsl(${h.toFixed(0)} var(--vp-s) var(--vp-l))`;
+      // print: array of 24 numbers (or none -> seeded from `seed`); empty === true draws the dashed "no signature yet" circle
+      function svg(print, size, seed, empty) {
+        const sw = size <= 24 ? 7 : size <= 40 ? 4.6 : 3.6;
+        if (empty) return `<svg class="vp" width="${size}" height="${size}" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="38" fill="none" stroke="currentColor" stroke-opacity=".45" stroke-width="${sw * .7}" stroke-dasharray="${size <= 24 ? "9 11" : "6 9"}" stroke-linecap="round"/></svg>`;
+        const p = have(print) ? print.slice(0, 24) : synth(seed), n = norm(p), c = color(hueOf(p));
+        let d = "";
+        n.forEach((v, i) => {
+          const a = i / 24 * 2 * Math.PI - Math.PI / 2, r0 = size <= 24 ? 18 : 24, r1 = r0 + 6 + v * (size <= 24 ? 22 : 18);
+          d += `M${(50 + r0 * Math.cos(a)).toFixed(2)} ${(50 + r0 * Math.sin(a)).toFixed(2)}L${(50 + r1 * Math.cos(a)).toFixed(2)} ${(50 + r1 * Math.sin(a)).toFixed(2)}`;
+        });
+        return `<svg class="vp" width="${size}" height="${size}" viewBox="0 0 100 100" aria-hidden="true"><path d="${d}" fill="none" stroke-width="${sw}" stroke-linecap="round" style="stroke:${c}"/></svg>`;
+      }
+      return { svg, hue: (print, seed) => hueOf(have(print) ? print : synth(seed)), color };
+    })();
 
-  // ---------- status pill ----------
+  // a voiceprint as an element: print = 24 values (or none), seed for the fallback, empty = dashed circle ("…")
+  const vpEl = (print, size, seed, empty) => { const s = el("span", "vpw"); s.style.width = s.style.height = size + "px"; s.innerHTML = VP.svg(print, size, seed, empty); return s; };
+  const printFor = name => { const p = people.find(x => x.name.toLowerCase() === String(name).toLowerCase()); return p && p.print; };
+
+  // ---------- navigation ----------
+  const PAGES = ["captions", "voices", "people", "engine", "appearance"];
+  function show(page, replace) {
+    if (!PAGES.includes(page)) page = "captions";
+    for (const p of PAGES) $("p-" + p).classList.toggle("on", p === page);
+    for (const n of document.querySelectorAll(".nav")) {
+      if (n.dataset.page === page) n.setAttribute("aria-current", "page"); else n.removeAttribute("aria-current");
+    }
+    if (location.hash !== "#" + page) history[replace ? "replaceState" : "pushState"](null, "", "#" + page);
+    $("main").scrollTop = 0;
+    if (page !== "voices") stopAudio();
+    if (page === "voices") refreshInbox();
+  }
+  for (const n of document.querySelectorAll(".nav")) n.addEventListener("click", () => show(n.dataset.page));
+  window.addEventListener("hashchange", () => show(location.hash.slice(1), true));
+
+  // ---------- sheets ----------
+  function confirmSheet(title, body, okText, danger = true) {
+    return new Promise(resolve => {
+      const d = $("confirm-dlg");
+      $("cf-title").textContent = title;
+      $("cf-body").textContent = body;
+      const ok = $("cf-ok");
+      ok.textContent = okText;
+      ok.className = "btn " + (danger ? "danger" : "primary");
+      const done = v => { d.close(); resolve(v); };
+      ok.onclick = () => done(true);
+      $("cf-cancel").onclick = () => done(false);
+      d.oncancel = () => resolve(false);
+      d.showModal();
+    });
+  }
+
+  // ---------- status pill + sidebar state ----------
   let error = "", passes = [], delays = [];
   function renderPill() {
     const pill = $("pill");
@@ -350,35 +679,60 @@
       $("pill-text").textContent = `Listening · ${avg.toFixed(0)} ms per pass`;
     } else $("pill-text").textContent = settings ? "Listening" : "Starting…";
     pill.title = $("pill-text").textContent;
+    // the live dot is on only while captions are actually being made
+    const listening = Boolean(settings) && !error;
+    $("brand").classList.toggle("live", listening);
+    $("brand-state").textContent = !settings ? "Starting…" : busy ? "Preparing" : error ? "Paused" : "Listening";
   }
   const showError = e => { error = String(e || ""); renderPill(); };
 
-  // ---------- preview ----------
-  let live = "", livePending = "";
+  // ---------- live preview: the overlay's own CSS on sample turns ----------
+  const FONT_NATIVE = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif';
+  const fontOf = f => !f || /^Segoe UI Variable Text, Segoe UI, -apple-system/.test(f) ? FONT_NATIVE : f;
+  function pvChip(name) {
+    const b = el("b", "who");
+    const pr = printFor(name);
+    b.style.setProperty("--tint", `hsl(${VP.hue(pr, name).toFixed(0)} 80% var(--tl))`);
+    b.innerHTML = VP.svg(pr, 18, name);
+    b.append(name);
+    return b;
+  }
   function renderPreview() {
     if (!settings) return;
-    const st = settings.style || {};
+    const st = settings.style || {}, both = settings.audio.source === "both";
     const h = String(st.bg || "#101014").replace("#", "");
     const [R, G, B] = [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) || 0);
-    $("preview").style.background = `rgba(${R}, ${G}, ${B}, ${st.opacity ?? .72})`;
-    const t = $("preview-text");
-    t.style.color = st.fg || "#fff";
-    t.style.fontFamily = st.font || "system-ui";
-    t.style.fontSize = Math.min(Number(st.size) || 30, 30) + "px";
-    t.style.webkitLineClamp = String(Math.min(Number(st.lines) || 3, 3));
-    t.textContent = "";
-    if (live || livePending) {
-      t.append(live);
-      if (livePending) {
-        const p = document.createElement("span");
-        p.className = "pending";
-        p.textContent = (live ? " " : "") + livePending;
-        t.append(p);
-      }
-    } else t.textContent = SAMPLE;
+    const pv = $("pv");
+    const lum = (0.2126 * R + 0.7152 * G + 0.0722 * B) / 255, light = lum > .6 && (st.opacity ?? .72) > .45;
+    pv.style.setProperty("--vp-l", light ? "38%" : "70%"); pv.style.setProperty("--tl", light ? "30%" : "76%"); pv.style.textShadow = light ? "none" : "";
+    pv.style.setProperty("--pv-bg", `rgba(${R}, ${G}, ${B}, ${st.opacity ?? .72})`);
+    pv.style.setProperty("--pv-fg", st.fg || "#fff");
+    pv.style.setProperty("--pv-font", fontOf(st.font));
+    pv.style.setProperty("--pv-size", Math.min(Number(st.size) || 30, 24) + "px");
+    pv.style.setProperty("--pv-mic", st.mic_color || "#fff3b0");
+    pv.style.setProperty("--pv-sys", st.system_color || "#b8f4ff");
+    pv.textContent = "";
+    const turns = [
+      { cls: "d1", who: "Dr. Nikesh", text: "Let's go through this morning's scan results first." , src: "system" },
+      { who: "Shaurya", text: "The follow-up is booked for Thursday, and", pending: " I'll send the referral today.", src: "system" },
+    ];
+    if (both) turns.push({ who: null, text: "Thanks, that works for me.", src: "mic" });
+    const lines = Math.max(1, Math.min(Number(st.lines) || 3, 6));
+    const body = el("div"); body.style.cssText = `display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden;max-height:calc(${lines} * 1.34em)`;
+    for (const t of turns.slice(-Math.max(1, lines))) {
+      const p = el("p", (t.cls || "") + (both ? " src-" + t.src : ""));
+      if (!both) p.style.color = "";
+      p.append(t.who ? pvChip(t.who) : Object.assign(el("b", "who you"), { textContent: "You" }), t.text);
+      if (t.pending) p.append(el("span", "pending", t.pending));
+      body.append(p);
+    }
+    // keep line dimming on all but the newest
+    [...body.children].forEach((p, i, a) => { p.classList.toggle("d1", i === a.length - 2); });
+    pv.append(body);
   }
 
   // ---------- render settings into controls ----------
+  const pct = el => el.style.setProperty("--pct", ((el.value - el.min) / (el.max - el.min) * 100) + "%");
   function render(s) {
     settings = s;
     for (const el of controls) {
@@ -405,6 +759,7 @@
         el.value = v;
       } else if (el.type === "color") el.value = /^#[0-9a-f]{6}$/i.test(v) ? v : "#000000";
       else el.value = v ?? "";
+      if (el.type === "range") pct(el);
       const out = el.parentElement.querySelector("output");
       if (out) out.textContent = fmt(el, el.value);
     }
@@ -427,9 +782,28 @@
     renderPreview();
     save(delay);
   }
-
   function showCli(key) {
     if (settings) $("cli").textContent = `rt-captions set ${key} ${cliValue(get(settings, key))}`;
+  }
+
+  // a segmented control with arrow-key navigation; `onPick(button)` runs on each choice
+  function segmented(box, onPick) {
+    const buttons = [...box.querySelectorAll("button")];
+    const pick = b => {
+      for (const x of buttons) { x.setAttribute("aria-checked", x === b); x.tabIndex = x === b ? 0 : -1; }
+      onPick(b);
+    };
+    buttons.forEach((b, i) => {
+      b.addEventListener("click", () => pick(b));
+      b.addEventListener("keydown", e => {
+        const d = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+        if (!d) return;
+        e.preventDefault();
+        const n = buttons[(i + d + buttons.length) % buttons.length];
+        n.focus();
+        pick(n);
+      });
+    });
   }
 
   for (const el of controls) {
@@ -437,28 +811,13 @@
     el.addEventListener("focusin", () => showCli(key));
     el.addEventListener("mouseenter", () => showCli(key));
     if (el.classList.contains("seg")) {
-      const buttons = [...el.querySelectorAll("button")];
-      const pick = b => {
-        const v = "num" in el.dataset ? Number(b.dataset.value) : b.dataset.value;
-        for (const x of buttons) { x.setAttribute("aria-checked", x === b); x.tabIndex = x === b ? 0 : -1; }
-        setValue(key, v);
-      };
-      buttons.forEach((b, i) => {
-        b.addEventListener("click", () => pick(b));
-        b.addEventListener("keydown", e => {
-          const d = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
-          if (!d) return;
-          e.preventDefault();
-          const n = buttons[(i + d + buttons.length) % buttons.length];
-          n.focus();
-          pick(n);
-        });
-      });
+      segmented(el, b => setValue(key, "num" in el.dataset ? Number(b.dataset.value) : b.dataset.value));
     } else if (el.type === "checkbox") {
       el.addEventListener("change", () => setValue(key, el.checked));
     } else if (el.type === "range") {
       const out = el.parentElement.querySelector("output");
       el.addEventListener("input", () => {
+        pct(el);
         out.textContent = fmt(el, el.value);
         setValue(key, Number(el.value), 150);
       });
@@ -470,6 +829,7 @@
       el.addEventListener(el.type === "color" ? "input" : "change", () => setValue(key, el.value, el.type === "color" ? 150 : 0));
     }
   }
+  for (const o of document.querySelectorAll("output")) o.classList.add("num");
 
   $("reset").addEventListener("click", async () => {
     try {
@@ -481,7 +841,10 @@
 
   // ---------- engines ----------
   let engines = [], progress = {};
+  // speed / accuracy out of 5, from the measured notes in the engine catalogue
+  const RATING = { "nemotron-q4": [5, 3], "nemotron-q8": [4, 4], ultra: [2, 5], redux: [3, 3], whistle: [5, 2] };
   const mb = b => b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : Math.round(b / 1e6) + " MB";
+  const meter = (label, n) => { const m = el("span", "mt", label); m.setAttribute("aria-label", `${label} ${n} of 5`); for (let i = 0; i < 5; i++) m.append(el("i", i < n ? "on" : "")); return m; };
   async function loadEngines() { engines = await invoke("list_engines"); renderEngines(); }
   function renderEngines() {
     const box = $("engines");
@@ -492,12 +855,16 @@
       b.type = "button"; b.className = "eng"; b.setAttribute("role", "radio");
       b.setAttribute("aria-checked", e.id === cur); b.title = "audio.engine";
       const p = progress[e.id];
-      const state = p && !p.finished ? `${Math.floor(p.done * 100 / p.total)}%` : e.installed ? mb(e.bytes) : `Download · ${mb(e.bytes)}`;
-      b.innerHTML = `<span class="radio"></span><span class="label"></span><span class="state${e.installed ? "" : " get"}"></span><span class="hint"></span>`;
-      b.querySelector(".label").textContent = e.name;
+      const busy = p && !p.finished;
+      b.innerHTML = `<span class="tick"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5.3l2.2 2.2L8 3"/></svg></span><span class="nm"></span><span class="state"></span><span class="hint"></span>`;
+      b.querySelector(".nm").textContent = e.name;
       b.querySelector(".hint").textContent = e.blurb;
-      b.querySelector(".state").textContent = state;
-      if (p && !p.finished) { const bar = document.createElement("span"); bar.className = "bar"; bar.innerHTML = "<i></i>"; bar.firstChild.style.width = (p.done * 100 / p.total) + "%"; b.append(bar); }
+      const st = b.querySelector(".state");
+      st.textContent = busy ? `${Math.floor(p.done * 100 / p.total)}%` : e.installed ? mb(e.bytes) : `Download · ${mb(e.bytes)}`;
+      if (!e.installed && !busy) st.classList.add("get");
+      const r = RATING[e.id];
+      if (r) { const m = el("span", "meters"); m.append(meter("Speed", r[0]), meter("Accuracy", r[1])); b.append(m); }
+      if (busy) { const bar = el("span", "bar"); bar.innerHTML = "<i></i>"; bar.firstChild.style.width = (p.done * 100 / p.total) + "%"; b.append(bar); }
       b.addEventListener("click", () => pickEngine(e));
       b.addEventListener("focusin", () => showCli("audio.engine"));
       box.append(b);
@@ -524,14 +891,504 @@
   listen("caption", ({ payload: c }) => {
     if (typeof c.delay_s === "number") { delays.push(Math.max(0, c.delay_s)); if (delays.length > 20) delays.shift(); }
     else if (typeof c.pass_ms === "number" && c.committed) { passes.push(c.pass_ms); if (passes.length > 20) passes.shift(); }
-    if (c.committed) live = (c.raw ? live + c.committed : live + " " + c.committed).trim().slice(-220);
-    livePending = c.end_of_utterance ? "" : (c.pending || "");
-    renderPreview();
     renderPill();
   });
 
+  // ---------- helpers for voices and people ----------
+  const when = s => /^\d+$/.test(s) ? new Date(Number(s) * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : s;
+  const secs = n => Number(n).toFixed(1) + " s";
+  const clock = t => { t = Math.max(0, Math.round(t)); return Math.floor(t / 60) + ":" + String(t % 60).padStart(2, "0"); };
+  const heard = s => s < 60 ? Math.round(s) + " s" : Math.round(s / 60) + " min";
+  const DAY = 86400;
+  function ago(unix) {
+    const d = Math.floor((Date.now() / 1000 - unix) / DAY);
+    return d <= 0 ? "today" : d === 1 ? "yesterday" : d + " days ago";
+  }
+  const norm = s => String(s).toLowerCase();
+  let query = "";
+  const matches = (...parts) => !query || parts.some(p => norm(p).includes(query));
+
+  let people = [], inbox = [], live = [], inboxJson = "";
+  const syncNames = () => { const l = $("people-names"); l.textContent = ""; for (const p of people) l.append(new Option(p.name)); };
+  // ---------- audio players ----------
+  let current = null; // { audio, ui }
+  function stopAudio() { if (current) { current.audio.pause(); current = null; } }
+  const samples = new Map(); // "id:secs" -> Promise<{ url, data, dur }>
+  function loadSample(v) {
+    const key = v.id + ":" + v.sample_secs;
+    if (!samples.has(key)) {
+      samples.set(key, (async () => {
+        const bytes = await invoke("inbox_sample", { id: v.id });
+        if (!bytes || bytes.length <= 44) return null;
+        const buf = new Uint8Array(bytes);
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        try {
+          const dec = await ctx.decodeAudioData(buf.buffer.slice(0));
+          return { url: URL.createObjectURL(new Blob([buf], { type: "audio/wav" })), data: dec.getChannelData(0), dur: dec.duration };
+        } finally { ctx.close(); }
+      })().catch(() => null));
+    }
+    return samples.get(key);
+  }
+
+  function player(v) {
+    const box = el("div", "player");
+    const btn = el("button", "play"); btn.type = "button"; btn.disabled = true; btn.setAttribute("aria-label", "Play " + "Voice " + v.id);
+    const PLAY = '<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M3 1.6v8.8c0 .5.5.8.9.5l7-4.4c.4-.2.4-.8 0-1l-7-4.4c-.4-.3-.9 0-.9.5z"/></svg>';
+    const PAUSE = '<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="2.2" y="1.5" width="2.8" height="9" rx=".8"/><rect x="7" y="1.5" width="2.8" height="9" rx=".8"/></svg>';
+    btn.innerHTML = PLAY;
+    const wrap = el("div", "wavebox");
+    const canvas = document.createElement("canvas");
+    wrap.append(canvas);
+    const time = el("span", "time", v.sample_secs > 0 ? "…" : "no audio");
+    box.append(btn, wrap, time);
+    let d = null, audio = null, peaks = null, pw = 0, raf = 0;
+    const style = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+    function draw() {
+      const w = canvas.clientWidth, h = canvas.clientHeight, dpr = window.devicePixelRatio || 1;
+      if (!w || !h) return;
+      canvas.width = w * dpr; canvas.height = h * dpr;
+      const g = canvas.getContext("2d");
+      g.scale(dpr, dpr);
+      g.clearRect(0, 0, w, h);
+      if (!d) return;
+      if (pw !== w) { // peaks per pixel
+        pw = w; peaks = new Float32Array(Math.floor(w));
+        const per = d.data.length / peaks.length;
+        for (let x = 0; x < peaks.length; x++) {
+          let m = 0;
+          for (let i = Math.floor(x * per), e = Math.floor((x + 1) * per); i < e; i += Math.max(1, per >> 6)) m = Math.max(m, Math.abs(d.data[i]));
+          peaks[x] = m;
+        }
+      }
+      const top = Math.max(0.05, ...peaks), played = audio && d.dur ? audio.currentTime / d.dur * peaks.length : 0;
+      const on = style("--accent"), off = style("--wave");
+      for (let x = 0; x < peaks.length; x++) {
+        const amp = Math.max(1, peaks[x] / top * (h - 8));
+        g.fillStyle = x < played ? on : off;
+        g.fillRect(x, (h - amp) / 2, 0.8, amp);
+      }
+      if (audio && !audio.paused || played > 0) { g.fillStyle = on; g.fillRect(Math.floor(played), 2, 1.5, h - 4); }
+    }
+    const label = () => { if (d) time.textContent = clock(audio ? audio.currentTime : 0) + " / " + clock(d.dur); };
+    const tick = () => { draw(); label(); raf = audio && !audio.paused ? requestAnimationFrame(tick) : 0; };
+    const ensure = () => {
+      if (audio) return audio;
+      audio = new Audio(d.url);
+      audio.addEventListener("play", () => { btn.innerHTML = PAUSE; btn.setAttribute("aria-label", "Pause"); if (!raf) tick(); });
+      audio.addEventListener("pause", () => { btn.innerHTML = PLAY; btn.setAttribute("aria-label", "Play"); tick(); });
+      audio.addEventListener("ended", () => { audio.currentTime = 0; tick(); });
+      return audio;
+    };
+    loadSample(v).then(r => {
+      d = r;
+      if (!d) { time.textContent = "no audio"; return; }
+      btn.disabled = false;
+      label(); draw();
+    });
+    btn.addEventListener("click", () => {
+      if (!d) return;
+      const a = ensure();
+      if (a.paused) { if (current && current.audio !== a) current.audio.pause(); current = { audio: a }; a.play().catch(showError); } else a.pause();
+    });
+    canvas.addEventListener("click", e => {
+      if (!d) return;
+      const a = ensure(), r = canvas.getBoundingClientRect();
+      a.currentTime = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * d.dur;
+      tick();
+    });
+    new ResizeObserver(() => { pw = 0; draw(); }).observe(wrap);
+    box.toggle = () => btn.click();
+    return box;
+  }
+
+  // ---------- Voices page: review one voice at a time ----------
+  let curId = null, dir = 0, picking = false, pendingDiscard = new Map(); // id -> { timer, v }
+  const queue = () => inbox.filter(v => !pendingDiscard.has(v.id));
+  async function loadInbox() {
+    const next = await invoke("list_inbox");
+    const json = JSON.stringify(next);
+    inbox = next;
+    const n = queue().length;
+    $("badge").textContent = n; $("badge").hidden = !n;
+    if (json !== inboxJson) { inboxJson = json; renderInbox(); }
+  }
+  const refreshInbox = () => loadInbox().catch(showError);
+
+  function typing() { const a = document.activeElement; return a && ["INPUT", "SELECT", "TEXTAREA"].includes(a.tagName) && $("p-voices").contains(a); }
+  const metaOf = v => `${v.meetings} ${v.meetings === 1 ? "meeting" : "meetings"} · ${heard(v.seconds_heard)} heard · last heard ${ago(v.last_seen)}`;
+
+  function renderInbox() {
+    if (typing()) { inboxJson = ""; return; } // draw once they are done
+    const q = queue();
+    $("voices-lede").textContent = q.length
+      ? `${q.length} unnamed ${q.length === 1 ? "voice" : "voices"}. Listen, then say who it is.`
+      : "Voices heard in meetings that nobody has named yet.";
+    if (!q.length) curId = null;
+    else if (!q.some(v => v.id === curId)) curId = q[0].id;
+    renderReview();
+    renderList();
+  }
+
+  function goTo(id, d) { if (id == null) return; stopAudio(); curId = id; dir = d || 0; picking = false; renderReview(); renderList(); }
+  function step(d) { const q = queue(); if (q.length < 2) return; const i = q.findIndex(v => v.id === curId); goTo(q[(i + d + q.length) % q.length].id, d); }
+
+  function renderReview() {
+    stopAudio();
+    const box = $("review-box");
+    box.textContent = "";
+    const q = queue();
+    const v = q.find(x => x.id === curId);
+    if (!v) {
+      const e = el("div", "group empty");
+      e.append(vpEl(null, 56, "", true));
+      const on = settings && settings.audio.speakers;
+      e.append(el("b", "", inbox.length ? "All caught up" : "No unnamed voices"),
+        el("span", "d", on ? "Voices you hear in meetings appear here, so you can name them in a couple of clicks." : "Speaker labels are off, so new voices are not being collected."));
+      const btn = el("button", "btn primary", on ? "Add a person…" : "Turn on speaker labels"); btn.type = "button";
+      btn.onclick = () => { if (on) openSampleSheet(""); else { setValue("audio.speakers", true); render(settings); renderInbox(); } };
+      e.append(btn);
+      box.append(e);
+      return;
+    }
+    const name = "Voice " + v.id, idx = q.findIndex(x => x.id === v.id);
+    const card = el("article", "group review");
+    if (!dir) card.style.animation = "none";
+    // top: progress + prev / next
+    const top = el("div", "rv-top");
+    top.append(el("span", "num", `REVIEW · ${idx + 1} of ${q.length}`));
+    const nav2 = el("div", "nav2");
+    for (const [d, label, path] of [[-1, "Previous voice", "M6.5 2L3.5 5l3 3"], [1, "Next voice (S)", "M3.5 2l3 3-3 3"]]) {
+      const b = el("button", "btn plain iconbtn"); b.type = "button"; b.setAttribute("aria-label", label); b.title = label; b.disabled = q.length < 2;
+      b.innerHTML = `<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg>`;
+      b.onclick = () => step(d); nav2.append(b);
+    }
+    top.append(nav2);
+    // head: 96px voiceprint + title + meta
+    const head = el("div", "rv-head");
+    const t = el("div", "grow-txt");
+    const left = Math.ceil(30 - (Date.now() / 1000 - v.last_seen) / DAY);
+    t.append(el("div", "rv-title", name), el("div", "meta", metaOf(v)));
+    if (left <= 7) t.append(el("div", "meta", `Deleted in ${Math.max(left, 0)} ${left === 1 ? "day" : "days"} unless named`));
+    head.append(vpEl(v.print, 96, name, !(v.print && v.print.length)), t);
+    const pl = player(v);
+    card.append(top, head, pl);
+
+    // who is this?
+    card.append(el("div", "rv-q", "Who is this?"));
+    let chosen = "";
+    const input = el("input", "txt"); input.setAttribute("list", "people-names"); input.placeholder = "Or type a new name"; input.setAttribute("aria-label", "Name for " + name); input.autocomplete = "off";
+    const ok = el("button", "btn primary", "Save name"); ok.type = "button"; ok.disabled = true; ok.append(Object.assign(el("kbd"), { textContent: "↵" }));
+    const chipEls = [];
+    const syncSave = () => { ok.disabled = !input.value.trim(); for (const [c, n] of chipEls) c.setAttribute("aria-pressed", norm(n) === norm(input.value.trim())); };
+    const chips = el("div", "chips");
+    const best = v.best_match, bestName = best && best.score >= 0.4 ? best.name : null;
+    const order = (bestName ? [bestName] : []).concat(people.map(p => p.name).filter(n => n !== bestName));
+    for (const n of order.slice(0, 8)) {
+      const c = el("button", "sug" + (n === bestName ? " best" : "")); c.type = "button";
+      c.append(vpEl(printFor(n), 24, n));
+      c.append(document.createTextNode(n));
+      if (n === bestName) c.append(el("span", "pct", Math.round(best.score * 100) + "%"));
+      c.onclick = () => { input.value = n; syncSave(); input.focus(); };
+      chipEls.push([c, n]);
+      chips.append(c);
+    }
+    if (chips.children.length) card.append(chips);
+    const nameRow = el("div", "rv-name");
+    nameRow.append(input, ok);
+    card.append(nameRow);
+    input.addEventListener("input", syncSave);
+    const keepL = el("label", "chk"); const cb = el("input"); cb.type = "checkbox"; keepL.append(cb, document.createTextNode("Keep audio sample"));
+    const go = async () => {
+      const n = input.value.trim();
+      if (!n) return;
+      ok.disabled = true;
+      const nxt = q.length > 1 ? q[(idx + 1) % q.length].id : null;
+      try { await invoke("label_voice", { id: v.id, name: n, keepSample: cb.checked }); } catch (e) { ok.disabled = false; return showError(e); }
+      curId = nxt; dir = 1;
+      await loadPeople(); await refreshInbox();
+    };
+    ok.onclick = go;
+    input.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); go(); } });
+
+    // actions
+    const foot = el("div", "rv-foot");
+    const skip = el("button", "btn", "Skip"); skip.type = "button"; skip.append(Object.assign(el("kbd"), { textContent: "S" })); skip.disabled = q.length < 2; skip.onclick = () => step(1);
+    const same = el("button", "btn", "Same as another voice…"); same.type = "button"; same.disabled = q.length < 2;
+    same.setAttribute("aria-expanded", picking);
+    const del = el("button", "btn quiet red", "Discard"); del.type = "button"; del.onclick = () => discard(v);
+    foot.append(skip, same, keepL, del);
+    keepL.style.marginLeft = "auto";
+    card.append(foot);
+    const picker = el("div", "picker"); picker.hidden = !picking;
+    for (const o of q) if (o.id !== v.id) {
+      const b = el("button"); b.type = "button";
+      b.append(vpEl(o.print, 28, "Voice " + o.id, !(o.print && o.print.length)));
+      const tx = el("div"); tx.append(el("div", "", "Voice " + o.id), el("div", "meta", metaOf(o))); tx.firstChild.style.cssText = "font:600 13px var(--round)";
+      b.append(tx);
+      b.onclick = async () => {
+        try { await invoke("merge_voices", { keep: o.id, other: v.id }); } catch (e) { return showError(e); }
+        curId = o.id; dir = 1; picking = false; await refreshInbox();
+      };
+      picker.append(b);
+    }
+    same.onclick = () => { picking = !picking; picker.hidden = !picking; same.setAttribute("aria-expanded", picking); };
+    card.append(picker);
+    box.append(card);
+    card._toggle = () => pl.toggle();
+    box._card = card;
+    if (!typing() && dir) input.focus({ preventScroll: true });
+    dir = 0;
+  }
+
+  // discard with an inline undo for 5 s instead of a confirm dialog
+  function discard(v) {
+    const q = queue(), i = q.findIndex(x => x.id === v.id);
+    const nxt = q.length > 1 ? q[(i + 1) % q.length].id : null;
+    const timer = setTimeout(async () => {
+      try { await invoke("discard_voice", { id: v.id }); } catch (e) { showError(e); }
+      pendingDiscard.delete(v.id); hideToast(); refreshInbox();
+    }, 5000);
+    pendingDiscard.set(v.id, { timer, v });
+    $("badge").textContent = queue().length; $("badge").hidden = !queue().length;
+    curId = nxt; dir = 1; renderInbox();
+    toast(`Voice ${v.id} discarded`, "Undo", () => {
+      const p = pendingDiscard.get(v.id); if (!p) return;
+      clearTimeout(p.timer); pendingDiscard.delete(v.id); curId = v.id; dir = 1; hideToast(); renderInbox();
+    });
+  }
+  let toastTimer = 0;
+  function toast(text, action, fn) {
+    const t = $("toast");
+    t.textContent = ""; t.hidden = false;
+    t.append(el("span", "", text));
+    const b = el("button", "btn", action); b.type = "button"; b.onclick = fn; t.append(b, el("i"));
+    t.style.position = "fixed";
+    clearTimeout(toastTimer); toastTimer = setTimeout(hideToast, 5000);
+  }
+  function hideToast() { $("toast").hidden = true; }
+
+  function renderList() {
+    const box = $("inbox");
+    box.textContent = "";
+    const q = queue();
+    if (!q.length) return;
+    const shown = q.filter(v => matches("voice " + v.id, "voice" + v.id, v.best_match ? v.best_match.name : ""));
+    box.append(el("div", "gh", "All unnamed voices"));
+    if (!shown.length) { box.append(el("div", "quiet-empty", `No voices match “${query}”.`)); return; }
+    const g = el("div", "group");
+    for (const v of shown) {
+      const r = el("button", "vrow"); r.type = "button";
+      r.setAttribute("aria-current", v.id === curId);
+      r.append(vpEl(v.print, 36, "Voice " + v.id, !(v.print && v.print.length)));
+      const t = el("div", "grow-txt"); t.append(el("div", "t", "Voice " + v.id), el("div", "meta", metaOf(v)));
+      r.append(t);
+      if (v.best_match && v.best_match.score >= 0.4) r.append(el("span", "guess", `maybe ${v.best_match.name} · ${Math.round(v.best_match.score * 100)}%`));
+      r.onclick = () => { goTo(v.id, 1); $("main").scrollTop = 0; };
+      g.append(r);
+    }
+    box.append(g);
+  }
+
+  // keyboard: Space plays, S / → skips, ← goes back
+  document.addEventListener("keydown", e => {
+    if (location.hash !== "#voices" || e.metaKey || e.ctrlKey || e.altKey || document.querySelector("dialog[open]")) return;
+    const a = document.activeElement;
+    if (a && ["INPUT", "TEXTAREA", "SELECT"].includes(a.tagName)) return;
+    if (e.key === " " && !(a && a.tagName === "BUTTON")) { const c = $("review-box")._card; if (c) { e.preventDefault(); c._toggle(); } }
+    else if (e.key === "s" || e.key === "S" || e.key === "ArrowRight") { e.preventDefault(); step(1); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); step(-1); }
+  });
+
+  // voices of the meeting in progress (named here, or by clicking a label on the captions)
+  function renderLive() {
+    const box = $("live");
+    if (box.contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;
+    box.textContent = "";
+    const shown = live.filter(v => matches(v.label, v.person || ""));
+    if (!shown.length) return;
+    box.append(el("div", "gh", "In this meeting"));
+    const g = el("div", "group");
+    for (const v of shown) {
+      const row = el("div", "row");
+      row.style.cssText = "padding-left:14px;margin-left:0";
+      const left = el("div", "grow-txt"); left.style.cssText = "display:flex;align-items:center;gap:12px";
+      const t = el("div");
+      t.append(el("span", "label", v.label), el("span", "hint", (v.person ? "Matches " + v.person + (v.score != null ? ` (${v.score.toFixed(2)})` : "") : "New voice") + " · " + v.turns + (v.turns === 1 ? " turn" : " turns") + " · " + secs(v.seconds) + " heard"));
+      t.firstChild.style.cssText = "font:600 13px var(--round)";
+      left.append(vpEl(v.print, 36, v.label, !(v.print && v.print.length)), t);
+      const acts = el("div", "ctl");
+      const play = el("button", "btn iconbtn"); play.type = "button"; play.title = "Play a sample"; play.setAttribute("aria-label", "Play a sample of " + v.label);
+      play.innerHTML = '<svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor"><path d="M3 1.6v8.8c0 .5.5.8.9.5l7-4.4c.4-.2.4-.8 0-1l-7-4.4c-.4-.3-.9 0-.9.5z"/></svg>';
+      play.addEventListener("click", () => playLive(v.key));
+      const input = el("input", "txt"); input.style.width = "130px"; input.setAttribute("list", "people-names"); input.placeholder = "Assign to…"; input.setAttribute("aria-label", "Assign " + v.label + " to"); input.autocomplete = "off";
+      const go = () => { const name = input.value.trim(); if (name) assignLive(v.key, name); };
+      input.addEventListener("keydown", e => { if (e.key === "Enter") go(); });
+      const ok = el("button", "btn", "Save"); ok.type = "button"; ok.addEventListener("click", go);
+      acts.append(play, input, ok);
+      row.append(left, acts);
+      g.append(row);
+    }
+    box.append(g);
+  }
+  async function assignLive(key, name) {
+    try { await invoke("assign_voice", { key, name }); } catch (e) { return showError(e); }
+    setTimeout(() => { refreshLive(); loadPeople().catch(showError); refreshInbox(); }, 500); // the speaker thread saves, then we re-read
+  }
+  let livePlaying = null;
+  async function playLive(key) {
+    try {
+      const bytes = await invoke("voice_sample", { key });
+      if (!bytes.length || bytes.length <= 44) return showError("No clean speech from this voice yet");
+      if (livePlaying) livePlaying.pause();
+      livePlaying = new Audio(URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: "audio/wav" })));
+      livePlaying.play().catch(showError);
+    } catch (e) { showError(e); }
+  }
+  async function refreshLive() {
+    try { live = await invoke("list_voices"); renderLive(); } catch (e) { /* no session yet */ }
+  }
+
+  // ---------- People page ----------
+  async function loadPeople() { people = await invoke("list_people"); syncNames(); renderPeople(); if (inbox.length) { inboxJson = ""; renderInbox(); } }
+  const openPeople = new Set();
+
+  function renderPeople() {
+    const box = $("people");
+    if (box.contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;
+    box.textContent = "";
+    $("people-count").textContent = people.length ? `${people.length} ${people.length === 1 ? "person" : "people"}` : "People";
+    const shown = people.filter(p => matches(p.name));
+    if (!people.length) {
+      const e = el("div", "empty");
+      e.append(vpEl(null, 56, "", true), el("b", "", "Nobody saved yet"), el("span", "d", "Name a voice from Voices, or record a short sample of someone's voice."));
+      const b = el("button", "btn primary", "Add person…"); b.type = "button"; b.onclick = () => openSampleSheet("");
+      e.append(b); box.append(e);
+      return;
+    }
+    if (!shown.length) box.append(el("div", "quiet-empty", `Nobody matches “${query}”.`));
+    for (const p of shown) {
+      const n = p.signatures.length;
+      const row = el("div", "prow");
+      const head = el("div", "phead");
+      const nameIn = el("input", "txt inline"); nameIn.value = p.name; nameIn.setAttribute("aria-label", "Name");
+      const rename = () => { const nn = nameIn.value.trim(); if (nn && nn !== p.name) invoke("rename_person", { id: p.id, name: nn }).then(loadPeople).catch(showError); else nameIn.value = p.name; };
+      nameIn.addEventListener("change", rename);
+      nameIn.addEventListener("keydown", e => { if (e.key === "Enter") nameIn.blur(); });
+      const t = el("div", "grow-txt");
+      t.append(nameIn, el("div", "meta", `${n} voice ${n === 1 ? "signature" : "signatures"}`));
+      t.firstChild.style.width = "100%";
+      const add = el("button", "btn quiet", "Add voice sample"); add.type = "button";
+      add.addEventListener("click", () => openSampleSheet(p.name));
+      const toggle = el("button", "btn plain iconbtn"); toggle.type = "button";
+      toggle.innerHTML = '<svg class="chev" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 1.5L6.5 5 3 8.5"/></svg>';
+      toggle.setAttribute("aria-label", "Show voice signatures of " + p.name);
+      toggle.setAttribute("aria-expanded", openPeople.has(p.id));
+      head.append(vpEl(p.print, 36, p.name), t, add, toggle);
+      row.append(head);
+      const sigs = el("div", "sigs"); sigs.hidden = !openPeople.has(p.id);
+      for (const s of p.signatures) {
+        const line = el("div", "sig");
+        line.append(el("span", "", `${when(s.added)} · meeting ${when(s.meeting)} · ${secs(s.seconds)}`));
+        const x = el("button", "btn quiet red", "Remove"); x.type = "button"; x.setAttribute("aria-label", "Remove this signature");
+        x.addEventListener("click", () => invoke("delete_signature", { personId: p.id, signatureId: s.id }).then(loadPeople).catch(showError));
+        line.append(x);
+        sigs.append(line);
+      }
+      const del = el("div", "sig"); const dbtn = el("button", "btn quiet red", "Delete person…"); dbtn.type = "button";
+      dbtn.addEventListener("click", async () => {
+        if (!await confirmSheet(`Delete ${p.name}?`, `${p.name} and all ${n} voice ${n === 1 ? "signature" : "signatures"} are removed. Their voice will show as an unnamed voice from now on.`, "Delete")) return;
+        invoke("delete_person", { id: p.id }).then(loadPeople).catch(showError);
+      });
+      del.append(el("span"), dbtn); sigs.append(del);
+      toggle.addEventListener("click", () => {
+        sigs.hidden = !sigs.hidden;
+        openPeople[sigs.hidden ? "delete" : "add"](p.id);
+        toggle.setAttribute("aria-expanded", !sigs.hidden);
+      });
+      row.append(sigs);
+      box.append(row);
+    }
+  }
+
+  // ---------- add voice sample sheet ----------
+  const sd = { mode: "record", len: 10, busy: false };
+  const RING = 2 * Math.PI * 48;
+  function sdRefresh() {
+    $("sd-rec").hidden = sd.mode !== "record";
+    $("sd-imp").hidden = sd.mode !== "import";
+    $("sd-go").textContent = sd.mode === "record" ? "Record" : "Add sample";
+    $("sd-go").className = "btn " + (sd.mode === "record" ? "rec" : "primary");
+    $("sd-go").disabled = sd.busy;
+    $("sd-cancel").disabled = sd.busy;
+    $("sd-pick").hidden = sd.busy && sd.mode === "record";
+  }
+  function openSampleSheet(name) {
+    sd.mode = "record"; sd.busy = false;
+    $("sd-name").value = name || "";
+    $("sd-name").readOnly = Boolean(name);
+    $("sd-title").textContent = name ? `Add voice sample for ${name}` : "Add a person";
+    $("sd-err").textContent = "";
+    $("sd-live").hidden = true; $("sd-tip").hidden = false;
+    $("sd-file").value = "";
+    for (const b of $("sd-mode").querySelectorAll("button")) b.setAttribute("aria-checked", b.dataset.value === "record");
+    sdRefresh();
+    $("sample-dlg").showModal();
+    if (!name) $("sd-name").focus();
+  }
+  segmented($("sd-mode"), b => { sd.mode = b.dataset.value; $("sd-err").textContent = ""; sdRefresh(); });
+  segmented($("sd-len"), b => { sd.len = Number(b.dataset.value); });
+  $("add-person").addEventListener("click", () => openSampleSheet(""));
+  $("sd-cancel").addEventListener("click", () => $("sample-dlg").close());
+  $("sample-dlg").addEventListener("cancel", e => { if (sd.busy) e.preventDefault(); });
+  listen("record-level", ({ payload: p }) => {
+    $("sd-meter").style.width = Math.round(Math.min(1, p.level) * 100) + "%";
+    $("sd-count").textContent = Math.max(0, Math.ceil(p.left));
+    $("sd-ring").style.strokeDashoffset = String(RING * (1 - Math.max(0, Math.min(1, p.left / sd.len))));
+  });
+  $("sd-go").addEventListener("click", async () => {
+    const name = $("sd-name").value.trim();
+    const err = $("sd-err");
+    err.textContent = "";
+    if (!name) { err.textContent = "Enter a name first."; return; }
+    sd.busy = true; sdRefresh();
+    try {
+      if (sd.mode === "record") {
+        $("sd-live").hidden = false; $("sd-tip").hidden = true;
+        $("sd-count").textContent = sd.len; $("sd-meter").style.width = "0"; $("sd-ring").style.strokeDashoffset = "0";
+        await invoke("record_signature", { name, seconds: sd.len });
+      } else {
+        const f = $("sd-file").files[0];
+        if (!f) throw "Choose a WAV file first.";
+        if (f.size > 40e6) throw "That file is too large. Use a shorter recording.";
+        const bytes = Array.from(new Uint8Array(await f.arrayBuffer()));
+        await invoke("import_signature", { name, bytes });
+      }
+      $("sample-dlg").close();
+      await loadPeople();
+    } catch (e) {
+      err.textContent = String(e);
+      $("sd-live").hidden = true; $("sd-tip").hidden = false;
+    }
+    sd.busy = false; sdRefresh();
+  });
+
+  // ---------- search ----------
+  $("q").addEventListener("input", () => {
+    query = norm($("q").value.trim());
+    if (query && !["voices", "people"].includes(location.hash.slice(1))) show("people");
+    inboxJson = ""; renderInbox(); renderLive(); renderPeople();
+  });
+
+  // ---------- go ----------
+  setInterval(() => { if (!document.hidden && location.hash === "#voices") { refreshLive(); refreshInbox(); } }, 3000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { refreshLive(); refreshInbox(); loadPeople().catch(() => {}); } });
   window.addEventListener("error", e => showError(e.message));
   window.addEventListener("unhandledrejection", e => showError(e.reason));
+  show(location.hash.slice(1) || "captions", true);
+  loadPeople().catch(showError);
+  refreshInbox();
+  refreshLive();
   invoke("get_settings").then(s => { render(s); return loadEngines(); }).catch(showError);
   invoke("get_status").then(s => { if (s) showError(s); }).catch(() => {});
 </script>

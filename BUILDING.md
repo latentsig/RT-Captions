@@ -1,8 +1,7 @@
 # Building RT Captions
 
 Written so a person **or a coding agent** can follow it top to bottom. Every step is a command; each
-ends with a check. Tested on Windows 11 (x64). The macOS path is written but has not yet been run on a
-Mac: if a step fails there, fix it and update this file.
+ends with a check. Tested on Windows 11 x64 and macOS 15.6 on Apple Silicon.
 
 ## What gets built
 
@@ -14,9 +13,10 @@ Mac: if a step fails there, fix it and update this file.
 | `libneedle` | Cactus's official prebuilt wheel | runs Cactus Whistle |
 | models | downloaded by the app on first use (Hugging Face) | 17 MB to 1 GB each; not in the repo |
 
-`src-tauri/scripts/setup-engines.mjs` fetches/builds the two native libraries into
-`src-tauri/engine/<macos|windows>/` (gitignored). Builds are portable (`GGML_NATIVE=OFF`), so a
-build made on one machine runs on others of the same OS/architecture.
+`src-tauri/scripts/setup-engines.mjs` fetches and builds the two native libraries into
+`src-tauri/engine/<macos|windows>/`, which Git ignores. Builds use `GGML_NATIVE=OFF`, so a build made
+on one machine runs on others with the same OS and architecture. On macOS, the script embeds the
+Metal shaders in `libparakeet.dylib` and keeps all GGML code inside that library.
 
 ## macOS (Apple Silicon)
 
@@ -33,15 +33,19 @@ cargo install tauri-cli --version "^2" --locked
 git clone https://github.com/latentsig/RT-Captions.git
 cd RT-Captions
 
-# 3. Engine libraries (clones + builds parakeet.cpp with Metal, ~5-10 min; downloads libneedle)
+# 3. Engine libraries. This builds parakeet.cpp with Metal and downloads libneedle.
 node src-tauri/scripts/setup-engines.mjs
 # check: ls src-tauri/engine/macos  ->  libneedle.dylib  libparakeet.dylib
+# check: otool -L src-tauri/engine/macos/libparakeet.dylib
+#        shows its @rpath install name and Apple system libraries, with no engine/.build paths
 
 # 4. Tests, then the app bundle and .dmg
 cd src-tauri
 cargo test --release --lib
 cargo tauri build
 # check: target/release/bundle/macos/RT Captions.app and target/release/bundle/dmg/*.dmg
+# check: target/release/bundle/macos/RT Captions.app/Contents/MacOS/rt-captions exists
+#        and Contents/Resources/engine contains both dylibs
 
 # 5. Smoke test without the GUI (downloads the default engine, ~720 MB, on first run)
 ./target/release/rt-captions download nemotron-q4
@@ -49,14 +53,21 @@ cargo tauri build
 ./target/release/rt-captions listen --source mic --seconds 20   # speak; captions print
 ```
 
-Install: open the `.dmg`, drag **RT Captions** to Applications. The build is unsigned, so the first
-launch is right-click -> **Open** (or `xattr -dr com.apple.quarantine "/Applications/RT Captions.app"`).
-macOS asks for microphone access on first use. Put the CLI on your PATH with
+Install: open the `.dmg`, drag **RT Captions** to Applications. The local build is ad hoc signed but
+not notarized, so the first launch is right-click -> **Open**. You can also run
+`xattr -dr com.apple.quarantine "/Applications/RT Captions.app"`.
+macOS asks for microphone and Screen & System Audio Recording access on first use. Put the CLI on your PATH with
 `"/Applications/RT Captions.app/Contents/MacOS/rt-captions" install-cli`.
 
-macOS today: microphone captions only. System-audio capture (calls, videos) needs ScreenCaptureKit and
-is not implemented yet; choosing "System" or "Both" captions the mic and says so. Engines may use
-Metal (GPU) automatically.
+System audio (calls, videos) uses ScreenCaptureKit (macOS 13+); first use asks for Screen & System
+Audio Recording permission (the app, or the terminal when using the CLI). The default
+Nemotron engine uses Metal automatically. Parakeet Redux currently fails in its upstream packed
+ternary kernel on Metal. Run Redux with `PARAKEET_DEVICE=cpu`, for example:
+
+```sh
+rt-captions set audio.engine redux
+PARAKEET_DEVICE=cpu rt-captions listen --source mic
+```
 
 ## Windows (x64)
 
@@ -87,10 +98,10 @@ download on first use.
 ## For agents
 
 - Do not commit `src-tauri/engine/`, `src-tauri/binaries/`, models (`*.gguf`, `*.cact`) or audio.
-- `cargo tauri build` runs `src-tauri/scripts/prepare-cli.mjs` first (builds the CLI and stages it as a
-  sidecar); run it from the repo root or `src-tauri/`.
+- `cargo tauri build` builds both Cargo binaries and packages `rt-captions` with the app.
 - Verify a change with the CLI instead of the GUI: `rt-captions bench clip.wav --ref @reference.txt`
   prints WER, word latency (p50/p95) and engine load; `rt-captions --help` lists everything.
+- Named voices live in `people.json` (next to `models/`; vectors only, never audio): `rt-captions people`, `rt-captions enroll <name> <wav>`; test speaker names without speakers via `RT_CAPTIONS_FAKE_MIC=<wav> rt-captions listen --source mic`.
 - Settings live in `rt-captions settings` (a JSON file); a running app picks up `rt-captions set` live.
 - If parakeet.cpp's pinned commit stops building, update `PARAKEET_COMMIT` in `setup-engines.mjs`
   and re-run the smoke test above before committing.

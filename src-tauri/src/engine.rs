@@ -3,9 +3,10 @@
 
 use crate::captioner::{join, Captioner, StreamConfig};
 use crate::engines::{self, Kind};
-use crate::{asr::Asr, audio, dsp::Dsp};
+use crate::{asr::Asr, audio, dsp::Dsp, speakers::{LabelerThread, VoiceInfo}};
 use serde::{Deserialize, Serialize};
-use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender, TryRecvError};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, SendError, Sender, TryRecvError};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -24,12 +25,20 @@ pub struct AudioSettings {
     pub rnnoise: bool,
     /// Newline-separated words and phrases to favour (names, jargon).
     pub keywords: String,
+    /// Streaming engines: feed only what the loudness detector calls speech. Off (default): feed
+    /// everything and let the model decide; with the model on the GPU this costs little and
+    /// quiet or distant voices are not lost.
+    pub skip_silence: bool,
+    /// Label who is speaking on the system audio (needs the diarization model).
+    pub speakers: bool,
+    /// Cosine a saved voice must reach to name a speaker automatically.
+    pub speaker_threshold: f64,
     pub stream: StreamConfig,
 }
 
 impl Default for AudioSettings {
     fn default() -> Self {
-        Self { source: if cfg!(target_os = "macos") { "mic".into() } else { "both".into() }, engine: engines::DEFAULT.into(), threads: 0, mode: "balanced".into(), language: "en".into(), rnnoise: false, keywords: String::new(), stream: StreamConfig::default() }
+        Self { source: "both".into(), engine: engines::DEFAULT.into(), threads: 0, mode: "balanced".into(), language: "en".into(), rnnoise: false, keywords: String::new(), skip_silence: false, speakers: true, speaker_threshold: 0.6, stream: StreamConfig::default() }
     }
 }
 
@@ -46,6 +55,18 @@ pub struct Caption {
     /// `committed` is a raw text fragment to append as-is (it carries its own spaces and may end
     /// mid-word), not a list of whole words to join with spaces.
     pub raw: bool,
+    /// System input with speaker labels on: the speaker's turn id (a new one each time someone starts talking) and its label.
+    pub speaker: Option<usize>,
+    pub speaker_name: Option<String>,
+}
+
+/// What the engine thread is told: new settings (restart the session) or something for the speaker thread.
+pub enum Msg {
+    Settings(AudioSettings),
+    Assign { key: String, name: String },
+    ListVoices(Sender<Vec<VoiceInfo>>),
+    VoiceSample { key: String, reply: Sender<Vec<f32>> },
+    ReloadPeople,
 }
 
 pub enum Event {
@@ -69,12 +90,73 @@ pub fn effective_threads(a: &AudioSettings) -> usize {
     }
 }
 
-pub fn spawn(emit: impl Fn(Event) + Send + 'static) -> Sender<AudioSettings> {
-    let (tx, rx) = channel::<AudioSettings>();
-    std::thread::Builder::new()
+pub struct EngineHandle {
+    sender: Option<Sender<Msg>>,
+    worker: Option<JoinHandle<()>>,
+}
+
+impl EngineHandle {
+    pub fn send(&self, settings: AudioSettings) -> Result<(), SendError<AudioSettings>> {
+        match &self.sender {
+            Some(sender) => sender.send(Msg::Settings(settings)).map_err(|SendError(m)| match m {
+                Msg::Settings(s) => SendError(s),
+                _ => unreachable!(),
+            }),
+            None => Err(SendError(settings)),
+        }
+    }
+
+    fn tell(&self, msg: Msg) {
+        if let Some(sender) = &self.sender {
+            let _ = sender.send(msg);
+        }
+    }
+
+    /// Names a voice ("turn:<id>", "person:<id>" or "voice:<n>") and saves its signatures for next time.
+    pub fn assign_voice(&self, key: String, name: String) {
+        self.tell(Msg::Assign { key, name });
+    }
+
+    /// The people database changed on disk: the speaker thread re-reads it.
+    pub fn reload_people(&self) {
+        self.tell(Msg::ReloadPeople);
+    }
+
+    /// Voices heard in this meeting (empty when there is no session or it does not answer in 500 ms).
+    pub fn list_voices(&self) -> Vec<VoiceInfo> {
+        let (tx, rx) = channel();
+        self.tell(Msg::ListVoices(tx));
+        rx.recv_timeout(Duration::from_millis(500)).unwrap_or_default()
+    }
+
+    /// Playback sample of a voice (16 kHz mono).
+    pub fn voice_sample(&self, key: String) -> Vec<f32> {
+        let (tx, rx) = channel();
+        self.tell(Msg::VoiceSample { key, reply: tx });
+        rx.recv_timeout(Duration::from_millis(500)).unwrap_or_default()
+    }
+
+    pub fn shutdown(&mut self) {
+        self.sender.take();
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+impl Drop for EngineHandle {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+pub fn spawn(emit: impl Fn(Event) + Send + 'static) -> EngineHandle {
+    let (tx, rx) = channel::<Msg>();
+    let worker = std::thread::Builder::new()
         .name("engine".into())
         .spawn(move || {
-            let Ok(mut settings) = rx.recv() else { return };
+            realtime_priority();
+            let Some(mut settings) = next_settings(&rx) else { return };
             let mut loaded: Option<(String, usize, Asr)> = None;
             loop {
                 let threads = effective_threads(&settings);
@@ -84,12 +166,12 @@ pub fn spawn(emit: impl Fn(Event) + Send + 'static) -> Sender<AudioSettings> {
                         Ok(asr) => loaded = Some((settings.engine.clone(), threads, asr)),
                         Err(e) => {
                             emit(Event::Status(format!("Speech engine failed to load: {e:#}")));
-                            match rx.recv() {
-                                Ok(next) => {
+                            match next_settings(&rx) {
+                                Some(next) => {
                                     settings = next;
                                     continue;
                                 }
-                                Err(_) => return,
+                                None => return,
                             }
                         }
                     }
@@ -102,7 +184,16 @@ pub fn spawn(emit: impl Fn(Event) + Send + 'static) -> Sender<AudioSettings> {
             }
         })
         .expect("engine thread");
-    tx
+    EngineHandle { sender: Some(tx), worker: Some(worker) }
+}
+
+/// Blocks for the next settings, ignoring speaker messages (there is no session; their reply channels just close).
+fn next_settings(rx: &Receiver<Msg>) -> Option<AudioSettings> {
+    loop {
+        if let Msg::Settings(s) = rx.recv().ok()? {
+            return Some(s);
+        }
+    }
 }
 
 /// Speech gate for streaming engines: silence is never fed to the model (no CPU), a short
@@ -185,19 +276,89 @@ struct Input {
     detector: Detector,
     /// Samples fed to this source's streaming session (its clock).
     fed: usize,
-    _stream: cpal::Stream,
+    /// Samples received since the session started (debug clock: audio time vs wall time).
+    heard_total: usize,
+    _stream: audio::Capture,
     dsp: Dsp,
     cap: Captioner,
     gate: Gate,
     queued: Vec<f32>,
     last_audio: Instant,
+    /// Ungated streaming: when the model last produced text (None = nothing since the last flush).
+    heard: Option<Instant>,
+    /// RT_CAPTIONS_DEBUG: per-second input level and speech/mute counts on stderr.
+    probe: Probe,
 }
 
+/// RT_CAPTIONS_DEBUG=1: one line per event to stderr; RT_CAPTIONS_DEBUG=<file>: appended there
+/// (the GUI app has no terminal).
+/// The engine and speaker threads run at the highest non-realtime priority, so a busy Mac (or
+/// macOS deprioritising a background app) never makes captions fall behind.
+pub fn realtime_priority() {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        extern "C" {
+            fn pthread_set_qos_class_self_np(qos: u32, relative_priority: i32) -> i32;
+        }
+        const QOS_CLASS_USER_INTERACTIVE: u32 = 0x21;
+        pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+    }
+}
+
+pub fn debug_log(line: std::fmt::Arguments) {
+    use std::io::Write;
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    let t = START.get_or_init(Instant::now).elapsed().as_secs_f64();
+    match std::env::var_os("RT_CAPTIONS_DEBUG") {
+        Some(v) if v == "1" => eprintln!("[debug {t:.2}] {line}"),
+        Some(path) => {
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                let _ = writeln!(f, "{t:.2} {line}");
+            }
+        }
+        None => {}
+    }
+}
+
+#[derive(Default)]
+struct Probe {
+    since: Option<Instant>,
+    sum_sq: f64,
+    n: usize,
+    speech: usize,
+    muted: usize,
+    blocks: usize,
+}
+
+impl Probe {
+    fn add(&mut self, name: &str, audio: &[f32], speech: usize, blocks: usize, muted: bool, floor: f64) {
+        if std::env::var_os("RT_CAPTIONS_DEBUG").is_none() {
+            return;
+        }
+        let since = *self.since.get_or_insert_with(Instant::now);
+        self.sum_sq += audio.iter().map(|x| (*x as f64).powi(2)).sum::<f64>();
+        self.n += audio.len();
+        self.speech += speech;
+        self.blocks += blocks;
+        self.muted += if muted { blocks } else { 0 };
+        if since.elapsed() >= Duration::from_secs(1) {
+            debug_log(format_args!("{name}: {:.1}s audio rms={:.4} floor={:.4} speech={}/{} muted={}",
+                      self.n as f64 / 16_000.0, (self.sum_sq / self.n.max(1) as f64).sqrt(), floor, self.speech, self.blocks, self.muted));
+            *self = Probe::default();
+        }
+    }
+}
+
+/// Ungated streaming: this long without new text ends an utterance.
+const UTTERANCE_GAP: f64 = 1.2;
+/// Ungated "both": the mic stays muted this long after the system side last produced text.
+const ECHO_HOLD: Duration = Duration::from_millis(800);
 const STARVED: Duration = Duration::from_millis(200);
-const BATCH: usize = 1_600; // 100 ms at 16 kHz
+// On the GPU a call is cheap, so work in 20 ms steps; on CPU 100 ms (each call wakes a thread pool).
+const BATCH: usize = if cfg!(target_os = "macos") { 320 } else { 1_600 };
 
 /// Runs until new settings arrive (returned) or the app goes away (None).
-fn session(asr: &mut Asr, s: &AudioSettings, rx: &Receiver<AudioSettings>, emit: &impl Fn(Event)) -> Option<AudioSettings> {
+fn session(asr: &mut Asr, s: &AudioSettings, rx: &Receiver<Msg>, emit: &impl Fn(Event)) -> Option<AudioSettings> {
     asr.set_keywords(&s.keywords);
     asr.set_language(&s.language);
     asr.reset_streams();
@@ -228,24 +389,41 @@ fn session(asr: &mut Asr, s: &AudioSettings, rx: &Receiver<AudioSettings>, emit:
                 gate: Gate { active: false, silent: 0, preroll: Vec::new() },
                 detector: Detector::new(),
                 fed: 0,
+                heard_total: 0,
                 queued: Vec::new(),
                 last_audio: Instant::now(),
+                heard: None,
+                probe: Probe::default(),
             }),
-            // ponytail: macOS has no system-audio capture yet (needs ScreenCaptureKit), so "both"
-            // degrades to the mic there instead of failing outright.
+            // ponytail: if system capture fails (e.g. no permission), "both"
+            // degrades to the mic instead of failing outright.
             Err(e) if name == "system" && !inputs.is_empty() => {
+                debug_log(format_args!("system audio failed: {e:#}"));
                 emit(Event::Status(format!("Captioning the microphone only. System audio: {e:#}")));
                 fallback = true;
             }
             Err(e) => {
                 emit(Event::Status(format!("{name}: {e:#}")));
-                return rx.recv().ok();
+                return next_settings(rx);
             }
         }
     }
     drop(atx);
+    debug_log(format_args!("session: engine={} sources={:?} skip_silence={}", s.engine, inputs.iter().map(|i| i.name).collect::<Vec<_>>(), s.skip_silence));
     if !fallback {
         emit(Event::Status(String::new()));
+    }
+    // Speaker labels on the other people: the system input in "both" (the mic is you), else the
+    // only input (a mic in a room hears everyone). Only when the models are on disk.
+    let labeled: &str = if inputs.len() > 1 { "system" } else { inputs[0].name };
+    let mut labeler = None;
+    // The speaker of the last labeled caption, so a sentence's trailing "." stays with its speaker.
+    let mut last_who: Option<(usize, String)> = None;
+    if s.speakers && streaming {
+        match LabelerThread::spawn(s.speaker_threshold) {
+            Ok(l) => labeler = Some(l),
+            Err(e) => debug_log(format_args!("speaker labels off: {e:#}")),
+        }
     }
     let both = inputs.len() > 1;
     let queue = |inputs: &mut Vec<Input>, (i, chunk): (usize, Vec<f32>)| {
@@ -256,7 +434,27 @@ fn session(asr: &mut Asr, s: &AudioSettings, rx: &Receiver<AudioSettings>, emit:
     };
     loop {
         match rx.try_recv() {
-            Ok(next) => return Some(next),
+            Ok(Msg::Settings(next)) => return Some(next),
+            Ok(Msg::Assign { key, name }) => {
+                if let Some(l) = labeler.as_ref() {
+                    l.assign(key, name);
+                }
+            }
+            Ok(Msg::ReloadPeople) => {
+                if let Some(l) = labeler.as_ref() {
+                    l.reload_people();
+                }
+            }
+            Ok(Msg::ListVoices(reply)) => {
+                if let Some(l) = labeler.as_ref() {
+                    l.voices(reply); // answered from the speaker thread, so captions never wait
+                }
+            }
+            Ok(Msg::VoiceSample { key, reply }) => {
+                if let Some(l) = labeler.as_ref() {
+                    l.sample(key, reply);
+                }
+            }
             Err(TryRecvError::Disconnected) => return None,
             Err(TryRecvError::Empty) => {}
         }
@@ -265,7 +463,7 @@ fn session(asr: &mut Asr, s: &AudioSettings, rx: &Receiver<AudioSettings>, emit:
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => {
                 emit(Event::Status("Audio device stopped".into()));
-                return rx.recv().ok();
+                return next_settings(rx);
             }
         }
         // Drain whatever queued up during the last pass, so we always work on the newest audio.
@@ -282,7 +480,11 @@ fn session(asr: &mut Asr, s: &AudioSettings, rx: &Receiver<AudioSettings>, emit:
         // ponytail: echo gate. Without headphones the mic hears the speakers, so while the
         // system side is talking the mic is ignored (which also drops talking over someone).
         // Upgrade: acoustic echo cancellation against the loopback signal.
-        let system_talking = both && if streaming { inputs[1].gate.active } else { inputs[1].cap.is_active() };
+        let system_talking = both && match (streaming, s.skip_silence) {
+            (true, true) => inputs[1].gate.active,
+            (false, true) => inputs[1].cap.is_active(),
+            (_, false) => inputs[1].heard.is_some_and(|t| t.elapsed() < ECHO_HOLD),
+        };
         for (i, input) in inputs.iter_mut().enumerate() {
             // Work in >= 100 ms batches: every model call wakes a pool of compute threads, so
             // fewer, larger calls cost far less CPU (at most 0.1 s of added delay).
@@ -290,35 +492,82 @@ fn session(asr: &mut Asr, s: &AudioSettings, rx: &Receiver<AudioSettings>, emit:
                 continue;
             }
             let audio = std::mem::take(&mut input.queued);
+            input.heard_total += audio.len();
             // Speech verdict per 32 ms block.
             let blocks: Vec<(Vec<f32>, bool)> =
                 audio.chunks(512).map(|b| (b.to_vec(), input.detector.next(b, s.stream.vad_threshold))).collect();
             let muted = both && i == 0 && system_talking;
+            input.probe.add(input.name, &audio, blocks.iter().filter(|b| b.1).count(), blocks.len(), muted, input.detector.floor);
+            if let (Some(l), true) = (labeler.as_ref(), input.name == labeled) {
+                // Ungated: the diarizer hears the same audio as the model, muted or not.
+                l.feed(&audio);
+            }
             let t = Instant::now();
             let update = if streaming {
-                let (feed, ended) = input.gate.pass(blocks.iter().map(|(b, sp)| (b.as_slice(), *sp)), muted);
+                let (feed, gate_ended) = if s.skip_silence {
+                    input.gate.pass(blocks.iter().map(|(b, sp)| (b.as_slice(), *sp)), muted)
+                } else if muted {
+                    (Vec::new(), false)
+                } else {
+                    (audio, false)
+                };
                 input.fed += feed.len();
                 let (mut text, mut words) = if feed.is_empty() { Default::default() } else {
                     asr.stream_feed(i, &feed).unwrap_or_else(|e| { eprintln!("{e:#}"); Default::default() })
                 };
+                // Ungated: the model is the speech detector. A pause with no new text ends the
+                // utterance, which flushes the last word and keeps each session short.
+                if !text.is_empty() {
+                    input.heard = Some(Instant::now());
+                }
+                let quiet = input.heard.is_some_and(|t| t.elapsed().as_secs_f64() >= s.stream.silence_s.max(UTTERANCE_GAP));
+                let ended = gate_ended || (!s.skip_silence && quiet);
+                if ended {
+                    input.heard = None;
+                }
                 if ended {
                     let (t2, w2) = asr.stream_finish(i).unwrap_or_else(|e| { eprintln!("{e:#}"); Default::default() });
                     text.push_str(&t2);
                     words.extend(w2);
                 }
                 let delay = words.last().map(|w| input.fed as f64 / 16_000.0 - w.end + t.elapsed().as_secs_f64());
+                if ended {
+                    input.fed = 0; // the next session's word times start from zero
+                }
                 (!text.is_empty() || ended).then(|| (text, String::new(), ended, delay))
             } else {
                 if muted {
                     input.cap.discard();
                 }
                 for (b, sp) in &blocks {
-                    input.cap.feed_with(b, *sp && !muted);
+                    // Ungated: every block counts as speech and the model decides what was said.
+                    input.cap.feed_with(b, (*sp || !s.skip_silence) && !muted);
                 }
                 input.cap.step(|buf| asr.transcribe(buf).unwrap_or_else(|e| { eprintln!("{e:#}"); Vec::new() }))
                     .map(|u| (join(&u.committed), u.pending, u.end_of_utterance, None))
             };
             if let Some((committed, pending, end_of_utterance, delay_s)) = update {
+                if !streaming && !(committed.is_empty() && pending.is_empty()) {
+                    input.heard = Some(Instant::now());
+                }
+                if std::env::var_os("RT_CAPTIONS_DEBUG").is_some() && !committed.is_empty() {
+                    debug_log(format_args!("{} caption at audio {:.2}s: {committed:?}", input.name, input.heard_total as f64 / 16_000.0));
+                }
+                let who = if input.name == labeled && !committed.trim().is_empty() { labeler.as_ref().and_then(|l| l.current()) } else { None };
+                let mut committed = committed;
+                if who.is_some() {
+                    let changed = last_who.as_ref().is_some_and(|l| Some(l.0) != who.as_ref().map(|w| w.0));
+                    let (punct, rest) = split_lead_punct(&committed);
+                    if changed && !punct.is_empty() {
+                        emit(Event::Caption(Caption { source: input.name, committed: punct.to_owned(), pending: String::new(),
+                            end_of_utterance: false, pass_ms: 0.0, delay_s: None, raw: streaming,
+                            speaker: last_who.as_ref().map(|w| w.0), speaker_name: last_who.as_ref().map(|w| w.1.clone()) }));
+                        committed = rest.to_owned();
+                    }
+                    if !committed.trim().is_empty() {
+                        last_who = who.clone();
+                    }
+                }
                 emit(Event::Caption(Caption {
                     source: input.name,
                     committed,
@@ -327,15 +576,30 @@ fn session(asr: &mut Asr, s: &AudioSettings, rx: &Receiver<AudioSettings>, emit:
                     pass_ms: t.elapsed().as_secs_f64() * 1000.0,
                     delay_s,
                     raw: streaming,
+                    speaker: who.as_ref().map(|w| w.0),
+                    speaker_name: who.map(|w| w.1),
                 }));
             }
         }
     }
 }
 
+/// Leading punctuation of a streamed fragment (". I think" -> (".", " I think")).
+fn split_lead_punct(text: &str) -> (&str, &str) {
+    let n = text.find(|c: char| !matches!(c, '.' | ',' | '?' | '!' | ';' | ':')).unwrap_or(text.len());
+    text.split_at(n)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn leading_punctuation_splits_off() {
+        assert_eq!(split_lead_punct(". I think"), (".", " I think"));
+        assert_eq!(split_lead_punct(" that"), ("", " that"));
+        assert_eq!(split_lead_punct("?"), ("?", ""));
+    }
 
     #[test]
     fn detector_ignores_steady_room_noise_but_hears_speech() {
@@ -360,5 +624,13 @@ mod tests {
         assert!(ended && out.len() == TAIL, "trailing silence is fed, then the utterance ends");
         let (out, _) = g.pass(blocks(10, true), true);
         assert!(out.is_empty(), "a muted source feeds nothing");
+    }
+
+    #[test]
+    fn engine_handle_shutdown_disconnects_and_joins_worker() {
+        let mut engine = spawn(|_| {});
+        engine.shutdown();
+        engine.shutdown();
+        assert!(engine.send(AudioSettings::default()).is_err());
     }
 }

@@ -27,6 +27,19 @@ impl Rs {
     }
 }
 
+/// Any WAV (rate, channels, int or float) -> 16 kHz mono.
+pub fn decode_wav_16k(bytes: &[u8]) -> anyhow::Result<Vec<f32>> {
+    let mut r = hound::WavReader::new(std::io::Cursor::new(bytes))?;
+    let spec = r.spec();
+    let pcm: Vec<f32> = match spec.sample_format {
+        hound::SampleFormat::Float => r.samples::<f32>().collect::<Result<_, _>>()?,
+        hound::SampleFormat::Int => r.samples::<i32>().map(|s| s.map(|v| v as f32 / (1i64 << (spec.bits_per_sample - 1)) as f32)).collect::<Result<_, _>>()?,
+    };
+    let ch = spec.channels.max(1) as usize;
+    let mono: Vec<f32> = pcm.chunks(ch).map(|f| f.iter().sum::<f32>() / ch as f32).collect();
+    Ok(Dsp::new(spec.sample_rate as usize, false).process(mono))
+}
+
 pub struct Dsp {
     to_mid: Option<Rs>,
     denoise: Option<(Box<DenoiseState<'static>>, Vec<f32>)>,

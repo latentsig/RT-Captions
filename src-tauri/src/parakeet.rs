@@ -8,6 +8,7 @@ use libloading::Library;
 use serde::Deserialize;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 type LoadFn = unsafe extern "C" fn(*const c_char) -> *mut c_void;
 type LoadErrFn = unsafe extern "C" fn() -> *const c_char;
@@ -18,6 +19,10 @@ type FreeFn = unsafe extern "C" fn(*mut c_void);
 type StreamBeginFn = unsafe extern "C" fn(*mut c_void, *const c_char) -> *mut c_void;
 type StreamFeedFn = unsafe extern "C" fn(*mut c_void, *const f32, c_int) -> *mut c_char;
 type StreamFinalizeFn = unsafe extern "C" fn(*mut c_void) -> *mut c_char;
+type ShutdownBackendFn = unsafe extern "C" fn();
+
+// parakeet.cpp shares one GGML backend across contexts. Loading and final teardown must not overlap.
+static LIVE_CONTEXTS: Mutex<usize> = Mutex::new(0);
 
 #[derive(Deserialize)]
 struct Out {
@@ -45,6 +50,7 @@ pub struct Parakeet {
     stream_feed: StreamFeedFn,
     stream_finalize: StreamFinalizeFn,
     stream_free: FreeFn,
+    shutdown_backend: ShutdownBackendFn,
     /// One streaming session per audio source.
     streams: Vec<*mut c_void>,
     /// Language prompt for new streaming sessions ("en", "hi", "auto").
@@ -62,6 +68,7 @@ impl Parakeet {
             std::env::set_var("PARAKEET_DEVICE", "cpu");
         }
         unsafe {
+            let mut live_contexts = LIVE_CONTEXTS.lock().unwrap_or_else(|e| e.into_inner());
             let lib = load_library(lib_path)?;
             if threads > 0 {
                 // ponytail: not in the C API; pk::set_num_threads(int) is exported from the clang
@@ -72,20 +79,36 @@ impl Parakeet {
             }
             let load: LoadFn = *lib.get(b"parakeet_capi_load\0")?;
             let load_err: LoadErrFn = *lib.get(b"parakeet_capi_load_error\0")?;
+            let batch_json: BatchJsonFn = *lib.get(b"parakeet_capi_transcribe_pcm_batch_json\0")?;
+            let free_str: FreeStrFn = *lib.get(b"parakeet_capi_free_string\0")?;
+            let last_err: LastErrFn = *lib.get(b"parakeet_capi_last_error\0")?;
+            let free: FreeFn = *lib.get(b"parakeet_capi_free\0")?;
+            let stream_begin: StreamBeginFn = *lib.get(b"parakeet_capi_stream_begin_lang\0")?;
+            let stream_feed: StreamFeedFn = *lib.get(b"parakeet_capi_stream_feed_json\0")?;
+            let stream_finalize: StreamFinalizeFn = *lib.get(b"parakeet_capi_stream_finalize_json\0")?;
+            let stream_free: FreeFn = *lib.get(b"parakeet_capi_stream_free\0")?;
+            // This pinned clang build exports pk::shutdown_backend(), but the C API does not.
+            let shutdown_backend: ShutdownBackendFn = *lib.get(b"_ZN2pk16shutdown_backendEv\0")?;
             let path = CString::new(model_path.to_string_lossy().as_bytes())?;
             let ctx = load(path.as_ptr());
             if ctx.is_null() {
-                bail!("parakeet load {}: {}", model_path.display(), CStr::from_ptr(load_err()).to_string_lossy());
+                let error = CStr::from_ptr(load_err()).to_string_lossy().into_owned();
+                if *live_contexts == 0 {
+                    shutdown_backend();
+                }
+                bail!("parakeet load {}: {error}", model_path.display());
             }
+            *live_contexts += 1;
             Ok(Self {
-                batch_json: *lib.get(b"parakeet_capi_transcribe_pcm_batch_json\0")?,
-                free_str: *lib.get(b"parakeet_capi_free_string\0")?,
-                last_err: *lib.get(b"parakeet_capi_last_error\0")?,
-                free: *lib.get(b"parakeet_capi_free\0")?,
-                stream_begin: *lib.get(b"parakeet_capi_stream_begin_lang\0")?,
-                stream_feed: *lib.get(b"parakeet_capi_stream_feed_json\0")?,
-                stream_finalize: *lib.get(b"parakeet_capi_stream_finalize_json\0")?,
-                stream_free: *lib.get(b"parakeet_capi_stream_free\0")?,
+                batch_json,
+                free_str,
+                last_err,
+                free,
+                stream_begin,
+                stream_feed,
+                stream_finalize,
+                stream_free,
+                shutdown_backend,
                 streams: Vec::new(),
                 lang: c"en".to_owned(),
                 ctx,
@@ -195,6 +218,202 @@ fn strip_tags(text: &str) -> String {
     out
 }
 
+/// A loaded non-ASR model (diarization or speaker encoder): library handle, context, and the
+/// shared live-context bookkeeping. Drop order matters: owners free streams first.
+struct Ctx {
+    _lib: Library,
+    ptr: *mut c_void,
+    last_err: LastErrFn,
+    free: FreeFn,
+    shutdown_backend: ShutdownBackendFn,
+}
+
+impl Ctx {
+    fn load(model_path: &Path) -> Result<Self> {
+        if !cfg!(target_os = "macos") {
+            std::env::set_var("PARAKEET_DEVICE", "cpu");
+        }
+        unsafe {
+            let mut live = LIVE_CONTEXTS.lock().unwrap_or_else(|e| e.into_inner());
+            let lib = load_library(&find_lib()?)?;
+            let load: LoadFn = *lib.get(b"parakeet_capi_load\0")?;
+            let load_err: LoadErrFn = *lib.get(b"parakeet_capi_load_error\0")?;
+            let last_err: LastErrFn = *lib.get(b"parakeet_capi_last_error\0")?;
+            let free: FreeFn = *lib.get(b"parakeet_capi_free\0")?;
+            let shutdown_backend: ShutdownBackendFn = *lib.get(b"_ZN2pk16shutdown_backendEv\0")?;
+            let path = CString::new(model_path.to_string_lossy().as_bytes())?;
+            let ptr = load(path.as_ptr());
+            if ptr.is_null() {
+                let error = CStr::from_ptr(load_err()).to_string_lossy().into_owned();
+                if *live == 0 {
+                    shutdown_backend();
+                }
+                bail!("parakeet load {}: {error}", model_path.display());
+            }
+            *live += 1;
+            Ok(Self { _lib: lib, ptr, last_err, free, shutdown_backend })
+        }
+    }
+
+    fn error(&self) -> String {
+        unsafe { CStr::from_ptr((self.last_err)(self.ptr)) }.to_string_lossy().into_owned()
+    }
+}
+
+impl Drop for Ctx {
+    fn drop(&mut self) {
+        let mut live = LIVE_CONTEXTS.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe { (self.free)(self.ptr) };
+        *live -= 1;
+        if *live == 0 {
+            unsafe { (self.shutdown_backend)() };
+        }
+    }
+}
+
+/// A stretch of one speaker, seconds from the stream start.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Segment {
+    pub speaker: usize,
+    pub start: f64,
+    pub end: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct RawSeg {
+    speaker: c_int,
+    start: f32,
+    end: f32,
+}
+
+type DiarBeginFn = unsafe extern "C" fn(*mut c_void, c_int) -> *mut c_void;
+type DiarFeedFn = unsafe extern "C" fn(*mut c_void, *const f32, c_int, c_int, *mut *mut RawSeg, *mut c_int) -> c_int;
+type DiarActiveFn = unsafe extern "C" fn(*mut c_void, *mut *mut RawSeg, *mut c_int) -> c_int;
+type DiarTimeFn = unsafe extern "C" fn(*mut c_void) -> f32;
+type FreeSegsFn = unsafe extern "C" fn(*mut RawSeg);
+
+const DIAR_LATENCY_ULTRA_LOW: c_int = 3; // 0.32 s chunks
+pub const DIAR_LATENCY_DEFAULT: c_int = DIAR_LATENCY_ULTRA_LOW;
+
+/// Streaming diarization of one 16 kHz source: who is speaking, with stable speaker indices.
+pub struct Diarizer {
+    stream: *mut c_void,
+    feed_fn: DiarFeedFn,
+    active_fn: DiarActiveFn,
+    time_fn: DiarTimeFn,
+    free_segs: FreeSegsFn,
+    stream_free: FreeFn,
+    ctx: Ctx,
+}
+
+unsafe impl Send for Diarizer {}
+
+impl Diarizer {
+    pub fn load(model_path: &Path, latency: c_int) -> Result<Self> {
+        let ctx = Ctx::load(model_path)?;
+        unsafe {
+            let lib = &ctx._lib;
+            let begin: DiarBeginFn = *lib.get(b"parakeet_capi_diarize_stream_begin_latency\0")?;
+            let feed_fn: DiarFeedFn = *lib.get(b"parakeet_capi_diarize_stream_feed\0")?;
+            let active_fn: DiarActiveFn = *lib.get(b"parakeet_capi_diarize_stream_active\0")?;
+            let time_fn: DiarTimeFn = *lib.get(b"parakeet_capi_diarize_stream_time\0")?;
+            let free_segs: FreeSegsFn = *lib.get(b"parakeet_capi_free_diar_segments\0")?;
+            let stream_free: FreeFn = *lib.get(b"parakeet_capi_diarize_stream_free\0")?;
+            let stream = begin(ctx.ptr, latency);
+            if stream.is_null() {
+                bail!("diarization stream: {}", ctx.error());
+            }
+            Ok(Self { stream, feed_fn, active_fn, time_fn, free_segs, stream_free, ctx })
+        }
+    }
+
+    fn take(&self, p: *mut RawSeg, n: c_int) -> Vec<Segment> {
+        let out = if p.is_null() { Vec::new() } else {
+            unsafe { std::slice::from_raw_parts(p, n.max(0) as usize) }.iter().filter(|s| s.speaker >= 0)
+                .map(|s| Segment { speaker: s.speaker as usize, start: s.start as f64, end: s.end as f64 }).collect()
+        };
+        if !p.is_null() {
+            unsafe { (self.free_segs)(p) };
+        }
+        out
+    }
+
+    /// Feed 16 kHz audio; returns the segments that ended since the last call.
+    pub fn feed(&mut self, pcm: &[f32]) -> Result<Vec<Segment>> {
+        let (mut p, mut n) = (std::ptr::null_mut(), 0);
+        let rc = unsafe { (self.feed_fn)(self.stream, pcm.as_ptr(), pcm.len() as c_int, 0, &mut p, &mut n) };
+        if rc != 0 {
+            bail!("diarization: {}", self.ctx.error());
+        }
+        Ok(self.take(p, n))
+    }
+
+    /// Segments still open ("who is speaking now"), ending at `time()`.
+    pub fn active(&mut self) -> Vec<Segment> {
+        let (mut p, mut n) = (std::ptr::null_mut(), 0);
+        if unsafe { (self.active_fn)(self.stream, &mut p, &mut n) } != 0 {
+            return Vec::new();
+        }
+        self.take(p, n)
+    }
+
+    /// Seconds of audio diarized so far (trails the audio fed by up to the 0.32 s latency).
+    pub fn time(&self) -> f64 {
+        unsafe { (self.time_fn)(self.stream) as f64 }
+    }
+}
+
+impl Drop for Diarizer {
+    fn drop(&mut self) {
+        unsafe { (self.stream_free)(self.stream) };
+    }
+}
+
+type EmbedFn = unsafe extern "C" fn(*mut c_void, *const f32, c_int, c_int, *mut *mut f32, *mut c_int) -> c_int;
+type FreeFloatsFn = unsafe extern "C" fn(*mut f32);
+type DimFn = unsafe extern "C" fn(*const c_void) -> c_int;
+
+/// Speaker encoder: audio in, L2-normalized voice vector out (cosine = dot product).
+pub struct Encoder {
+    embed_fn: EmbedFn,
+    free_floats: FreeFloatsFn,
+    dim_fn: DimFn,
+    ctx: Ctx,
+}
+
+unsafe impl Send for Encoder {}
+
+impl Encoder {
+    pub fn load(model_path: &Path) -> Result<Self> {
+        let ctx = Ctx::load(model_path)?;
+        unsafe {
+            let lib = &ctx._lib;
+            let embed_fn: EmbedFn = *lib.get(b"parakeet_capi_speaker_embed_pcm\0")?;
+            let free_floats: FreeFloatsFn = *lib.get(b"parakeet_capi_free_floats\0")?;
+            let dim_fn: DimFn = *lib.get(b"parakeet_capi_speaker_dim\0")?;
+            Ok(Self { embed_fn, free_floats, dim_fn, ctx })
+        }
+    }
+
+    /// Vector length.
+    pub fn dim(&self) -> usize {
+        unsafe { (self.dim_fn)(self.ctx.ptr) }.max(0) as usize
+    }
+
+    /// Voice vector of 16 kHz mono audio (>= ~2 s of one speaker works best).
+    pub fn embed(&mut self, pcm: &[f32]) -> Result<Vec<f32>> {
+        let (mut p, mut n) = (std::ptr::null_mut(), 0);
+        let rc = unsafe { (self.embed_fn)(self.ctx.ptr, pcm.as_ptr(), pcm.len() as c_int, SAMPLE_RATE as c_int, &mut p, &mut n) };
+        if rc != 0 || p.is_null() {
+            bail!("speaker embed: {}", self.ctx.error());
+        }
+        let v = unsafe { std::slice::from_raw_parts(p, n.max(0) as usize) }.to_vec();
+        unsafe { (self.free_floats)(p) };
+        Ok(v)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -206,8 +425,14 @@ mod tests {
 
 impl Drop for Parakeet {
     fn drop(&mut self) {
+        let mut live_contexts = LIVE_CONTEXTS.lock().unwrap_or_else(|e| e.into_inner());
         self.reset_streams();
-        unsafe { (self.free)(self.ctx) }
+        unsafe { (self.free)(self.ctx) };
+        debug_assert!(*live_contexts > 0);
+        *live_contexts -= 1;
+        if *live_contexts == 0 {
+            unsafe { (self.shutdown_backend)() };
+        }
     }
 }
 
@@ -228,11 +453,20 @@ fn lib_name() -> &'static str {
     if cfg!(windows) { "libparakeet.dll" } else if cfg!(target_os = "macos") { "libparakeet.dylib" } else { "libparakeet.so" }
 }
 
+fn engine_platform() -> &'static str {
+    if cfg!(windows) { "windows" } else if cfg!(target_os = "macos") { "macos" } else { "linux" }
+}
+
 /// The bundled libparakeet (next to the exe, or Contents/Resources on macOS); PARAKEET_LIB overrides.
 pub fn find_lib() -> Result<PathBuf> {
     let exe = std::env::current_exe()?.parent().context("exe dir")?.to_path_buf();
     std::env::var_os("PARAKEET_LIB").map(PathBuf::from).into_iter()
-        .chain([exe.join(lib_name()), exe.join("engine").join(lib_name()), exe.join("../Resources/engine").join(lib_name())])
+        .chain([
+            exe.join(lib_name()),
+            exe.join("engine").join(lib_name()),
+            exe.join("../Resources/engine").join(lib_name()),
+            exe.join("../../engine").join(engine_platform()).join(lib_name()),
+        ])
         .find(|p| p.exists())
         .ok_or_else(|| anyhow!("{} not found next to the app", lib_name()))
 }

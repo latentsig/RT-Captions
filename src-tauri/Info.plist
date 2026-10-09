@@ -4,5 +4,7 @@
 <dict>
   <key>NSMicrophoneUsageDescription</key>
   <string>RT Captions turns what your microphone hears into live captions, on this Mac only.</string>
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>RT Captions captions the audio your Mac plays (calls, videos), on this Mac only. It does not record your screen.</string>
 </dict>
 </plist>

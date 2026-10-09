@@ -5,6 +5,8 @@ use crate::dsp::Dsp;
 use crate::engine::{self, Event};
 use crate::settings::{self, Settings};
 use crate::asr::Asr;
+use crate::parakeet;
+use crate::people::{self, PeopleDb};
 use crate::engines::{self, Kind};
 use crate::whistle::{Word, SAMPLE_RATE};
 use anyhow::{bail, Context, Result};
@@ -20,12 +22,20 @@ USAGE
   rt-captions reset                    restore default settings
   rt-captions listen [--source mic|system|both] [--seconds N] [--json]
                                        caption live audio to stdout, no window
-  rt-captions transcribe <file.wav> [--json] [--window S] [--hop S] [--no-rnnoise]
+  rt-captions transcribe <file.wav> [--json] [--window S] [--hop S] [--no-rnnoise] [--speakers]
+  rt-captions diarize <file.wav> [--rttm-out F] [--realtime] [--live-labels]   speaker labels as RTTM (no captions)
                                        run a recording through the live pipeline
+  rt-captions people                   list saved people (voice signatures) and how many each has
+  rt-captions people delete <name>     forget a person
+  rt-captions voices                   list unnamed voices heard in meetings (kept 30 days)
+  rt-captions voices label <id> <name> name one (its audio is deleted)
+  rt-captions voices discard <id>      forget one
+  rt-captions enroll <name> <file.wav> save the voice of a one-speaker recording under a name
+  rt-captions compare <a.wav> <b.wav>... print the voice cosine of every pair of recordings
   rt-captions bench <file.wav> --ref <text|@file.txt> [--window 3,4,5] [--hop S] [--rnnoise|--no-rnnoise]
                                        accuracy (WER), latency and CPU per setting
   rt-captions engines                  list speech engines and which are downloaded
-  rt-captions download <engine>        download an engine's model (e.g. ultra)
+  rt-captions download <engine>        download an engine's model (e.g. ultra), or `diarization` / `speakers` for speaker labels
   rt-captions speed <file.wav> [--engine E] [--lens 2,3]
                                        per-call model time on clips of each length (rolling engines)
   rt-captions doctor                   engine, model, devices and settings paths
@@ -36,6 +46,8 @@ KEYS (rt-captions settings shows all)
   audio.engine  nemotron-q4|nemotron-q8|ultra|redux|whistle
   audio.mode  low|balanced|performance   audio.language  en|hi (Nemotron)
   audio.source  mic|system|both       audio.rnnoise  true|false        audio.keywords  \"Claude\\nFathom\"
+  audio.skip_silence  true|false      audio.speakers  true|false (label voices, system audio)
+  audio.speaker_threshold  0.6        cosine needed to name a known voice
   audio.stream.window_s  3            audio.stream.hop_s  0.25          audio.stream.finalize_s  2
   audio.stream.vad_threshold  0.008   overlay  true|false              auto_hide  true|false
   click_through  true|false           style.size  30   style.lines  3   style.fg  \"#ffffff\"
@@ -80,6 +92,9 @@ pub fn run(args: Vec<String>) -> Result<()> {
             apply_stream_flags(&mut cfg, &opt("--window"), &opt("--hop"))?;
             let rnnoise = rnnoise_flag(&args);
             let mut asr = load_asr(&opt)?;
+            if flag("--speakers") {
+                return transcribe_speakers(&mut asr, path, rnnoise);
+            }
             let run = run_file(&mut asr, path, &cfg, rnnoise)?;
             if flag("--json") {
                 println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "text": run.text(), "words": run.words, "lag_s": run.commit_lag }))?);
@@ -88,6 +103,11 @@ pub fn run(args: Vec<String>) -> Result<()> {
             }
             Ok(())
         }
+        Some("diarize") => diarize(args.get(1).context("usage: rt-captions diarize <file.wav> [--rttm-out <file>] [--realtime] [--live-labels]")?, opt("--rttm-out"), flag("--realtime"), flag("--live-labels")),
+        Some("people") => people(&args[1..]),
+        Some("voices") => voices(&args[1..]),
+        Some("enroll") => enroll(args.get(1).context("usage: rt-captions enroll <name> <file.wav>")?, args.get(2).context("usage: rt-captions enroll <name> <file.wav>")?),
+        Some("compare") => compare(&args[1..]),
         Some("bench") => bench(&args, &opt),
         Some("doctor") => doctor(),
         Some("engines") => {
@@ -101,7 +121,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
             Ok(())
         }
         Some("download") => {
-            let e = engines::get(args.get(1).context("usage: rt-captions download <engine>")?)?;
+            let e = engines::get_any(args.get(1).context("usage: rt-captions download <engine|diarization|speakers>")?)?;
             let mut last = u64::MAX;
             let path = engines::download(e, |done, total| {
                 let pct = done * 100 / total.max(1);
@@ -157,6 +177,8 @@ fn listen(source: Option<String>, seconds: Option<f64>, json: bool) -> Result<()
         audio.source = s;
     }
     let labeled = audio.source == "both";
+    let speakers = audio.speakers;
+    let mut last_speaker: Option<(usize, Option<String>)> = None;
     let (tx, rx) = std::sync::mpsc::channel();
     let engine = engine::spawn(move |ev| {
         let _ = tx.send(ev);
@@ -175,11 +197,17 @@ fn listen(source: Option<String>, seconds: Option<f64>, json: bool) -> Result<()
             Ok(Event::Caption(c)) if json => writeln!(out, "{}", serde_json::to_string(&c)?)?,
             Ok(Event::Caption(c)) => {
                 if !c.committed.is_empty() {
-                    if labeled && c.source != last_source {
+                    if speakers && c.speaker.is_some() && (c.source != last_source || last_speaker != c.speaker.map(|s| (s, c.speaker_name.clone()))) {
+                        // a voice recognised mid-turn starts a fresh header with its name
+                        write!(out, "\n[{}] ", c.speaker_name.as_deref().unwrap_or("Them"))?;
+                        last_source = c.source;
+                        last_speaker = c.speaker.map(|s| (s, c.speaker_name.clone()));
+                    } else if labeled && c.source != last_source {
                         write!(out, "\n[{}] ", if c.source == "mic" { "You" } else { "Them" })?;
                         last_source = c.source;
                     }
-                    write!(out, "{} ", c.committed)?;
+                    // streamed fragments carry their own spaces ("engi" + "neers")
+                    if c.raw { write!(out, "{}", c.committed)? } else { write!(out, "{} ", c.committed)? }
                 }
                 if c.end_of_utterance {
                     writeln!(out)?;
@@ -194,6 +222,187 @@ fn listen(source: Option<String>, seconds: Option<f64>, json: bool) -> Result<()
         }
     }
     writeln!(out)?;
+    Ok(())
+}
+
+/// `people` lists, `people delete <name>` forgets one.
+fn people(args: &[String]) -> Result<()> {
+    let mut db = PeopleDb::load();
+    match args.first().map(String::as_str) {
+        None => {
+            if db.people.is_empty() {
+                println!("no saved people ({})", people::path().display());
+            }
+            for p in &db.people {
+                println!("{:>3}  {:24} {} signature{}", p.id, p.name, p.signatures.len(), if p.signatures.len() == 1 { "" } else { "s" });
+            }
+            Ok(())
+        }
+        Some("delete") => {
+            let name = args[1..].join(" ");
+            let Some(id) = db.find(&name).map(|p| p.id) else { bail!("no saved person called '{name}'") };
+            db.delete_person(id);
+            db.save()?;
+            Ok(println!("deleted {name}"))
+        }
+        Some(other) => bail!("unknown people command '{other}' (try: people, people delete <name>)"),
+    }
+}
+
+/// `voices` lists the unnamed voices, `voices label <id> <name>` names one, `voices discard <id>` forgets one.
+fn voices(args: &[String]) -> Result<()> {
+    let mut db = PeopleDb::load();
+    let dir = people::voices_dir();
+    let id = |i: usize| -> Result<u64> { args.get(i).and_then(|a| a.trim_start_matches("Voice ").parse().ok()).context("usage: rt-captions voices [label <id> <name> | discard <id>]") };
+    match args.first().map(String::as_str) {
+        None => {
+            if db.unlabelled.is_empty() {
+                println!("no unnamed voices ({})", people::path().display());
+            }
+            let mut all = db.unlabelled.clone();
+            all.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
+            for u in &all {
+                let guess = u.signatures.iter().filter_map(|s| db.best_match(&s.vec)).max_by(|a, b| a.2.total_cmp(&b.2))
+                    .map_or(String::new(), |(_, n, c)| format!("  sounds like {n} ({c:.2})"));
+                println!("{:>3}  {} meeting(s), {:.0} s heard, {:.0} s sample, {} ago{guess}", u.id, u.meetings.len(), u.seconds_heard, u.sample_secs,
+                         age(people::now_u64().saturating_sub(u.last_seen)));
+            }
+            Ok(())
+        }
+        Some("label") => {
+            let (id, name) = (id(1)?, args[2..].join(" "));
+            match db.label_voice_files(&dir, id, &name, false)? {
+                Some(_) => {
+                    db.save()?;
+                    Ok(println!("Voice {id} is now {name} ({} signature(s))", db.find(&name).map_or(0, |p| p.signatures.len())))
+                }
+                None => bail!("no unnamed voice {id} (or empty name)"),
+            }
+        }
+        Some("discard") => {
+            let id = id(1)?;
+            if !db.discard_voice_files(&dir, id) {
+                bail!("no unnamed voice {id}");
+            }
+            db.save()?;
+            Ok(println!("discarded Voice {id}"))
+        }
+        Some(other) => bail!("unknown voices command '{other}' (try: voices, voices label <id> <name>, voices discard <id>)"),
+    }
+}
+
+/// "5 min", "3 h", "2 d".
+fn age(secs: u64) -> String {
+    match secs {
+        0..=89 => format!("{secs} s"),
+        90..=5399 => format!("{} min", secs / 60),
+        5400..=129_599 => format!("{} h", secs / 3600),
+        _ => format!("{} d", secs / 86_400),
+    }
+}
+
+/// `compare a.wav b.wav ...`: cosine matrix of the files' voices (to check how short a clip can be).
+fn compare(files: &[String]) -> Result<()> {
+    let spk = engines::get_any("speakers")?;
+    let Some(model) = engines::installed(spk) else { bail!("speaker model not downloaded (run: rt-captions download speakers)") };
+    let mut enc = parakeet::Encoder::load(&model)?;
+    let vecs = files.iter().map(|f| enc.embed(&read_wav_16k(f, false)?)).collect::<Result<Vec<_>>>()?;
+    for (i, a) in vecs.iter().enumerate() {
+        let row: Vec<String> = vecs.iter().map(|b| format!("{:5.2}", people::cosine(a, b))).collect();
+        println!("{} {}", row.join(" "), files[i]);
+    }
+    Ok(())
+}
+
+/// `enroll <name> <wav>`: the whole file is one speaker; its voice signature is saved under `name`.
+fn enroll(name: &str, path: &str) -> Result<()> {
+    let spk = engines::get_any("speakers")?;
+    let Some(model) = engines::installed(spk) else { bail!("speaker model not downloaded (run: rt-captions download speakers)") };
+    let audio = read_wav_16k(path, false)?;
+    let secs = audio.len() as f32 / SAMPLE_RATE as f32;
+    let vec = parakeet::Encoder::load(&model)?.embed(&audio)?;
+    let mut db = PeopleDb::load_for(spk.file);
+    if let Some((_, who, c)) = db.best_match(&vec) {
+        println!("closest saved voice before this: {who} (cosine {c:.3})");
+    }
+    db.assign(name, vec, &people::now_secs(), secs);
+    db.save()?;
+    Ok(println!("enrolled {name} from {secs:.1} s ({} signature(s) now)", db.find(name).map_or(0, |p| p.signatures.len())))
+}
+
+/// 100 ms feeds of `audio`, then 1.9 s of silence so the diarizer and the last turn catch up.
+fn feeds(audio: &[f32]) -> impl Iterator<Item = &[f32]> {
+    static TAIL: [f32; 19_200] = [0.0; 19_200];
+    audio.chunks(1_600).chain(TAIL.chunks(1_600))
+}
+
+/// `diarize <wav>`: the live labeller (turns, embeddings, people database) over a file, 100 ms at a
+/// time, no speech recognition. Writes the labels as an RTTM (`-` or no file: stdout). Faster than real
+/// time unless `--realtime`. Uses the people database in use (see RT_CAPTIONS_DATA).
+fn diarize(path: &str, out: Option<String>, realtime: bool, live: bool) -> Result<()> {
+    use crate::speakers::{write_rttm, Labeler};
+    let audio = read_wav_16k(path, false)?;
+    let mut labeler = Labeler::load(settings::load().audio.speaker_threshold)?;
+    labeler.record();
+    let (start, mut times, mut lag) = (Instant::now(), Vec::new(), Vec::new());
+    for (i, piece) in feeds(&audio).enumerate() {
+        if realtime {
+            std::thread::sleep((start + Duration::from_millis(100 * i as u64)).saturating_duration_since(Instant::now()));
+        }
+        labeler.feed(piece)?;
+        times.push(labeler.last_feed_ms);
+        lag.push(labeler.diar_lag_s());
+    }
+    labeler.finish();
+    let name = std::path::Path::new(path).file_stem().and_then(|s| s.to_str()).unwrap_or("file").split('.').next().unwrap_or("file").to_owned();
+    let segs = labeler.segments(live);
+    match out.as_deref() {
+        Some(f) if f != "-" => write_rttm(std::path::Path::new(f), &name, &segs)?,
+        _ => {
+            let tmp = std::env::temp_dir().join(format!("rtc-diarize-{}.rttm", std::process::id()));
+            write_rttm(&tmp, &name, &segs)?;
+            print!("{}", std::fs::read_to_string(&tmp)?);
+            let _ = std::fs::remove_file(tmp);
+        }
+    }
+    times.sort_by(|a, b| a.total_cmp(b));
+    let n = times.len();
+    eprintln!("diarizer trails the audio by {:.2} s on average (max {:.2} s)", lag.iter().sum::<f64>() / lag.len().max(1) as f64, lag.iter().cloned().fold(0.0, f64::max));
+    eprintln!("{n} feeds in {:.1} s; per 100 ms feed: mean {:.1} ms, p95 {:.1} ms, max {:.1} ms",
+              start.elapsed().as_secs_f64(), times.iter().sum::<f64>() / n.max(1) as f64, times[(n * 95 / 100).min(n.saturating_sub(1))], times.last().copied().unwrap_or(0.0));
+    Ok(())
+}
+
+/// `transcribe --speakers`: the live system-audio path over a file, 100 ms at a time, printing
+/// `[Voice N] text` whenever the speaker changes, then the per-feed diarization time.
+fn transcribe_speakers(asr: &mut Asr, path: &str, rnnoise: bool) -> Result<()> {
+    use crate::speakers::Labeler;
+    if asr.kind() != Kind::Streaming {
+        bail!("--speakers needs a streaming engine (nemotron-q4 or nemotron-q8)");
+    }
+    let audio = read_wav_16k(path, rnnoise)?;
+    let mut labeler = Labeler::load(settings::load().audio.speaker_threshold)?;
+    asr.reset_streams();
+    let (mut last, mut times) = (None, Vec::new());
+    for piece in feeds(&audio) {
+        labeler.feed(piece)?;
+        times.push(labeler.last_feed_ms);
+        let (text, _) = asr.stream_feed(0, piece)?;
+        if !text.is_empty() {
+            let who = labeler.current();
+            let key = who.clone();
+            if key != last {
+                last = key;
+                print!("\n[{}] ", who.map_or("?".into(), |w| w.1));
+            }
+            print!("{text}");
+        }
+    }
+    println!("{}", asr.stream_finish(0)?.0);
+    times.sort_by(|a, b| a.total_cmp(b));
+    let n = times.len();
+    eprintln!("diarization per 100 ms feed: mean {:.1} ms, p95 {:.1} ms, max {:.1} ms ({n} feeds)",
+              times.iter().sum::<f64>() / n.max(1) as f64, times[(n * 95 / 100).min(n.saturating_sub(1))], times.last().copied().unwrap_or(0.0));
     Ok(())
 }
 
@@ -225,7 +434,8 @@ fn load_asr(opt: &dyn Fn(&str) -> Option<String>) -> Result<Asr> {
     Ok(asr)
 }
 
-pub fn run_file(whistle: &mut Asr, path: &str, cfg: &StreamConfig, rnnoise: bool) -> Result<FileRun> {
+/// A WAV as live-pipeline audio: mono, 16 kHz, through dsp.
+fn read_wav_16k(path: &str, rnnoise: bool) -> Result<Vec<f32>> {
     let mut reader = hound::WavReader::open(path).with_context(|| format!("opening {path}"))?;
     let spec = reader.spec();
     let raw: Vec<f32> = match spec.sample_format {
@@ -237,7 +447,11 @@ pub fn run_file(whistle: &mut Asr, path: &str, cfg: &StreamConfig, rnnoise: bool
     };
     let ch = spec.channels as usize;
     let mono: Vec<f32> = raw.chunks(ch).map(|f| f.iter().sum::<f32>() / ch as f32).collect();
-    let audio = Dsp::new(spec.sample_rate as usize, rnnoise).process(mono);
+    Ok(Dsp::new(spec.sample_rate as usize, rnnoise).process(mono))
+}
+
+pub fn run_file(whistle: &mut Asr, path: &str, cfg: &StreamConfig, rnnoise: bool) -> Result<FileRun> {
+    let audio = read_wav_16k(path, rnnoise)?;
     let duration_s = audio.len() as f64 / SAMPLE_RATE as f64;
 
     let mut run = FileRun { words: Vec::new(), passes_ms: Vec::new(), commit_lag: Vec::new(), busy_s: 0.0, duration_s };

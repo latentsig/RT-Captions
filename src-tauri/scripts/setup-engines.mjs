@@ -87,9 +87,12 @@ if (force || !existsSync(parakeetOut)) {
     "-S", src, "-B", build, "-G", "Ninja",
     "-DCMAKE_BUILD_TYPE=Release",
     "-DPARAKEET_SHARED=ON", "-DPARAKEET_BUILD_CLI=OFF", "-DPARAKEET_BUILD_SERVER=OFF", "-DPARAKEET_BUILD_TESTS=OFF",
-    "-DGGML_NATIVE=OFF",
+    // Keep GGML inside libparakeet so the copied library has no private build-tree dependencies.
+    "-DGGML_NATIVE=OFF", "-DBUILD_SHARED_LIBS=OFF",
     ...(mac
-      ? ["-DPARAKEET_GGML_METAL=ON", "-DGGML_METAL_EMBED_LIBRARY=ON", `-DCMAKE_OSX_ARCHITECTURES=${process.arch === "arm64" ? "arm64" : "x86_64"}`, "-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0"]
+      // GGML's separate BLAS backend uses Accelerate APIs added in macOS 13.3. The CPU backend
+      // still uses Accelerate, while disabling BLAS preserves the app's declared macOS 12 floor.
+      ? ["-DPARAKEET_GGML_METAL=ON", "-DGGML_METAL_EMBED_LIBRARY=ON", "-DGGML_BLAS=OFF", `-DCMAKE_OSX_ARCHITECTURES=${process.arch === "arm64" ? "arm64" : "x86_64"}`, "-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0"]
       : ["-DGGML_AVX=ON", "-DGGML_AVX2=ON", "-DGGML_FMA=ON", "-DGGML_F16C=ON"]), // AVX2 baseline: Intel 2013+ / AMD Zen
   ];
   run("cmake", flags, { env });

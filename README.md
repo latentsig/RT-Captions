@@ -48,5 +48,5 @@ See **[BUILDING.md](BUILDING.md)** for macOS and Windows (also written for codin
 
 ## Not yet
 
-macOS system audio (ScreenCaptureKit), code signing / notarization, speaker diarization within one
+code signing / notarization, speaker diarization within one
 source, dictation into text fields, Hinglish written in mixed scripts.

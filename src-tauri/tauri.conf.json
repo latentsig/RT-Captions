@@ -1,11 +1,10 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "RT Captions",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "org.intelehealth.rtcaptions",
   "build": {
-    "frontendDist": "../ui",
-    "beforeBuildCommand": "node src-tauri/scripts/prepare-cli.mjs"
+    "frontendDist": "../ui"
   },
   "app": {
     "withGlobalTauri": true,
@@ -16,10 +15,10 @@
         "title": "RT Captions - Settings",
         "url": "settings.html",
         "create": false,
-        "width": 460,
-        "height": 760,
-        "minWidth": 400,
-        "minHeight": 520
+        "width": 900,
+        "height": 640,
+        "minWidth": 720,
+        "minHeight": 480
       },
       {
         "label": "overlay",
@@ -27,7 +26,7 @@
         "url": "overlay.html",
         "create": false,
         "width": 1000,
-        "height": 170,
+        "height": 230,
         "transparent": true,
         "decorations": false,
         "alwaysOnTop": true,
@@ -53,9 +52,6 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ],
-    "externalBin": [
-      "binaries/rt-captions"
     ],
     "windows": {
       "nsis": {

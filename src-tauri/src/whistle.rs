@@ -85,6 +85,10 @@ fn lib_name() -> &'static str {
     if cfg!(windows) { "libneedle.dll" } else if cfg!(target_os = "macos") { "libneedle.dylib" } else { "libneedle.so" }
 }
 
+fn engine_platform() -> &'static str {
+    if cfg!(windows) { "windows" } else if cfg!(target_os = "macos") { "macos" } else { "linux" }
+}
+
 fn home() -> PathBuf {
     std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from).unwrap_or_default()
 }
@@ -105,7 +109,12 @@ fn newest_with(dir: &Path, file: &str) -> Option<PathBuf> {
 pub fn find_lib() -> Result<PathBuf> {
     let d = exe_dir();
     std::env::var_os("NEEDLE_LIB").map(PathBuf::from).into_iter()
-        .chain([d.join(lib_name()), d.join("engine").join(lib_name()), d.join("../Resources/engine").join(lib_name())])
+        .chain([
+            d.join(lib_name()),
+            d.join("engine").join(lib_name()),
+            d.join("../Resources/engine").join(lib_name()),
+            d.join("../../engine").join(engine_platform()).join(lib_name()),
+        ])
         .find(|p| p.exists())
         .or_else(|| newest_with(&home().join(".cache/cactus-needle/v3"), lib_name()))
         .ok_or_else(|| anyhow!("{} not found next to the app", lib_name()))

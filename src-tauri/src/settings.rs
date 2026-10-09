@@ -29,7 +29,7 @@ impl Default for Settings {
             audio: AudioSettings::default(),
             overlay: true,
             click_through: false,
-            auto_hide: true,
+            auto_hide: false,
             style: serde_json::json!({ "font": "Segoe UI Variable Text, Segoe UI, -apple-system, system-ui, sans-serif",
                                        "size": 30, "fg": "#ffffff", "bg": "#101014", "opacity": 0.72,
                                        "lines": 3, "hide_after_s": 5,
@@ -111,5 +111,13 @@ mod tests {
         assert_eq!(s.audio.source, "system");
         assert!(set(&s, "audio.rnnoise", "\"yes\"").is_err());
         assert!(set(&s, "audio.nope", "1").is_err());
+    }
+
+    #[test]
+    fn defaults_keep_captions_visible_and_feed_all_audio() {
+        let s = Settings::default();
+        assert!(!s.auto_hide);
+        assert!(!s.audio.rnnoise);
+        assert!(!s.audio.skip_silence);
     }
 }

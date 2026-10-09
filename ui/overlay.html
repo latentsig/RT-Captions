@@ -8,20 +8,26 @@
       --fg: #fff;
       --bg: rgba(16, 16, 20, .72);
       --size: 30px;
-      --font: "Segoe UI Variable Text", "Segoe UI", -apple-system, system-ui, sans-serif;
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+      --round: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", system-ui, sans-serif;
       --lines: 3;
-      --lh: 1.32;
+      --lh: 1.34;
       --mic: #fff3b0;
       --sys: #b8f4ff;
+      --live: #ff453a;
+      /* the overlay is always drawn on a dark glass: voiceprints use their light-on-dark tone */
+      --vp-s: 78%; --vp-l: 70%; --tl: 76%; --unk: #b4b4bc;
     }
     html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+    .vp { display: block; flex: none; }
     #box {
       position: fixed; inset: 0; box-sizing: border-box;
-      padding: 12px 22px 14px;
-      border-radius: 16px;
+      padding: 14px 24px 16px;
+      border-radius: 18px;
       background: var(--bg);
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08);
-      display: flex; flex-direction: column; justify-content: flex-end; gap: 6px;
+      -webkit-backdrop-filter: blur(24px) saturate(1.4); backdrop-filter: blur(24px) saturate(1.4);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .09);
+      display: flex; flex-direction: column; justify-content: flex-end;
       transition: opacity .35s ease;
     }
     body.gone #box { opacity: 0; }
@@ -30,56 +36,139 @@
 
     #text {
       font-family: var(--font); font-size: var(--size); font-weight: 600;
-      line-height: var(--lh); color: var(--fg);
-      letter-spacing: .005em;
+      line-height: var(--lh); color: var(--fg); letter-spacing: -.003em;
       max-height: calc(var(--lines) * var(--lh) * 1em);
       overflow: hidden;
       display: flex; flex-direction: column; justify-content: flex-end;
-      text-shadow: 0 1px 2px rgba(0, 0, 0, .85), 0 0 1px rgba(0, 0, 0, .9);
+      text-shadow: 0 1px 2px rgba(0, 0, 0, .35);
       -webkit-font-smoothing: antialiased;
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 .7em); mask-image: linear-gradient(to bottom, transparent 0, #000 .7em);
     }
-    .seg { margin: 0; }
-    /* "Both" mode: who is speaking is shown by colour, not a label */
+    #lines { display: flex; flex-direction: column; will-change: transform; }
+    .seg { margin: 0; transition: opacity .2s ease; }
+    .seg.d1 { opacity: .7; }
+    .seg.d2 { opacity: .45; }
     body.labeled .src-mic { color: var(--mic); }
     body.labeled .src-system { color: var(--sys); }
-    .pending { opacity: .5; }
-    .new { animation: rise .22s ease-out; }
+
+    /* speaker chip: voiceprint + name, tinted with the speaker's hue */
+    .who { display: inline-flex; align-items: center; gap: .55em; font: 650 .64em/1 var(--round); font-variant-caps: all-small-caps; letter-spacing: .05em;
+      padding: .4em .85em .4em .5em; margin-right: .75em; border-radius: 999px; vertical-align: .2em; text-shadow: none;
+      color: var(--tint, #c8c8d0); background: color-mix(in srgb, var(--tint, #c8c8d0) 17%, transparent); border: 0; }
+    .who .vp { width: 18px; height: 18px; }
+    .who.unknown { --tint: var(--unk); font-weight: 600; background: color-mix(in srgb, var(--unk) 18%, transparent); padding-left: .5em; }
+    .who.you { --tint: var(--mic); }
+    .who.you .vp { display: none; }
+    .who.you::before { content: ""; width: .55em; height: .55em; border-radius: 50%; background: var(--mic); }
+    body.editable .who[data-sp] { cursor: pointer; }
+    body.editable .who[data-sp]:hover { background: color-mix(in srgb, var(--tint, #c8c8d0) 28%, transparent); }
+    .who:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+    .pending { opacity: .55; }
+    .new { animation: rise .08s ease-out; }
     @keyframes rise { from { opacity: 0; } to { opacity: 1; } }
 
-    #status {
-      font: 600 14px/1.35 var(--font); color: #ffd3cc;
-      display: flex; gap: 8px; align-items: flex-start;
-    }
-    #status::before { content: "!"; flex: none; width: 18px; height: 18px; border-radius: 50%;
-      background: #ff6b57; color: #fff; font-size: 12px; display: grid; place-items: center; }
+    /* status: a pill at the top, only when there is something to say */
+    #status { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 48px);
+      font: 600 13px/1.3 var(--font); color: #ffe3de; background: rgba(60, 20, 18, .82); padding: 5px 12px 5px 9px; border-radius: 999px;
+      display: flex; gap: 7px; align-items: center; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1); }
+    #status::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--live); }
     #status:empty { display: none; }
-    #status.info { color: #d8e6ff; }
-    #status.info::before { content: "↓"; background: #3d6fd9; }
+    #status.info { color: #dbe8ff; background: rgba(20, 36, 66, .82); }
+    #status.info::before { background: #0a84ff; }
+    body.lightbg #text { text-shadow: none; }
+    body.has-status #text { padding-top: 22px; }
+
+    /* naming popover */
+    #pop { position: fixed; z-index: 10; width: 292px; max-width: calc(100vw - 16px); box-sizing: border-box; padding: 10px;
+      font: 13px/1.3 var(--font); color: #f2f2f5; background: rgba(38, 39, 44, .96); border-radius: 12px; text-shadow: none;
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, .1), 0 8px 24px rgba(0, 0, 0, .4); }
+    #pop[hidden] { display: none; }
+    #pop .cap { font: 600 11px/1 var(--font); color: #9a9aa4; margin: 0 2px 8px; }
+    #pop .sug { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+    #pop .sug button { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 999px; padding: 3px 10px 3px 5px; cursor: pointer;
+      font: 600 12px/1 var(--round); color: #f2f2f5; background: rgba(255, 255, 255, .1); }
+    #pop .sug button:hover { background: rgba(255, 255, 255, .18); }
+    #pop .sug button.best { background: color-mix(in srgb, #0a84ff 38%, transparent); }
+    #pop .sug .vp { width: 16px; height: 16px; }
+    #pop .sug .pct { font: 11px ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums; opacity: .7; }
+    #pop input { width: 100%; box-sizing: border-box; height: 28px; padding: 0 9px; font: 13px var(--font); color: #fff; background: rgba(255, 255, 255, .09);
+      border: 0; border-radius: 7px; outline: none; }
+    #pop input:focus-visible, #pop button:focus-visible { box-shadow: 0 0 0 2px #0a84ff; }
+    #pop input::placeholder { color: #8e8e98; }
 
     @media (prefers-reduced-motion: reduce) {
       .new { animation: none; }
-      #box { transition: none; }
+      #box, .seg { transition: none; }
     }
   </style>
 </head>
 <body class="gone">
   <div id="box" data-tauri-drag-region>
     <div id="status" data-tauri-drag-region role="alert"></div>
-    <div id="text" data-tauri-drag-region aria-live="polite"></div>
+    <div id="text" data-tauri-drag-region aria-live="polite"><div id="lines" data-tauri-drag-region></div></div>
   </div>
+  <div id="pop" hidden role="dialog" aria-label="Name this voice"></div>
   <script>
     const { listen } = window.__TAURI__.event;
     const { invoke } = window.__TAURI__.core;
     const win = window.__TAURI__.window.getCurrentWindow();
     const $ = id => document.getElementById(id);
     const MAX_SEGMENTS = 12;
+    const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const NATIVE_FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif';
+    // ---------- voiceprint: a glyph drawn from the voice signature (24 radial bars; hue from the vector) ----------
+    const VP = (() => {
+      const hash = s => { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.codePointAt(0), 16777619) >>> 0; return h; };
+      const synth = seed => { let x = hash(seed) || 1; return Array.from({ length: 24 }, () => { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; return x / 4294967296 - .5; }); };
+      const centred = p => { const m = p.reduce((a, b) => a + b, 0) / p.length; return p.map(v => v - m); };
+      const hueOf = p => { let a = 0, b = 0; centred(p).forEach((v, i) => { const t = i / p.length * 2 * Math.PI; a += v * Math.cos(t); b += v * Math.sin(t); }); return ((Math.atan2(b, a) * 180 / Math.PI) % 360 + 360) % 360; };
+      const norm = p => { const c = centred(p), lo = Math.min(...c), hi = Math.max(...c), d = (hi - lo) || 1; return c.map(v => (v - lo) / d); };
+      const have = p => Array.isArray(p) && p.length >= 24;
+      const color = h => `hsl(${h.toFixed(0)} var(--vp-s) var(--vp-l))`;
+      // print: array of 24 numbers (or none -> seeded from `seed`); empty === true draws the dashed "no signature yet" circle
+      function svg(print, size, seed, empty) {
+        const sw = size <= 24 ? 7 : size <= 40 ? 4.6 : 3.6;
+        if (empty) return `<svg class="vp" width="${size}" height="${size}" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="38" fill="none" stroke="currentColor" stroke-opacity=".45" stroke-width="${sw * .7}" stroke-dasharray="${size <= 24 ? "9 11" : "6 9"}" stroke-linecap="round"/></svg>`;
+        const p = have(print) ? print.slice(0, 24) : synth(seed), n = norm(p), c = color(hueOf(p));
+        let d = "";
+        n.forEach((v, i) => {
+          const a = i / 24 * 2 * Math.PI - Math.PI / 2, r0 = size <= 24 ? 18 : 24, r1 = r0 + 6 + v * (size <= 24 ? 22 : 18);
+          d += `M${(50 + r0 * Math.cos(a)).toFixed(2)} ${(50 + r0 * Math.sin(a)).toFixed(2)}L${(50 + r1 * Math.cos(a)).toFixed(2)} ${(50 + r1 * Math.sin(a)).toFixed(2)}`;
+        });
+        return `<svg class="vp" width="${size}" height="${size}" viewBox="0 0 100 100" aria-hidden="true"><path d="${d}" fill="none" stroke-width="${sw}" stroke-linecap="round" style="stroke:${c}"/></svg>`;
+      }
+      return { svg, hue: (print, seed) => hueOf(have(print) ? print : synth(seed)), color };
+    })();
 
-    let settings = null;
-    let status = "";
+    // ---------- who is who: voiceprints and best guesses, fetched lazily ----------
+    const prints = new Map();   // lower-case name -> print
+    const guesses = new Map();  // "Voice 12" -> { name, score }
+    let peopleList = [], lastFetch = 0;
+    const unknownName = n => !n || n === "…";
+    async function refreshWho(force) {
+      if (!force && Date.now() - lastFetch < 3000) return;
+      lastFetch = Date.now();
+      try {
+        const [ps, vs, ib] = await Promise.all([invoke("list_people"), invoke("list_voices").catch(() => []), invoke("list_inbox").catch(() => [])]);
+        peopleList = ps;
+        for (const p of ps) if (p.print && p.print.length) prints.set(p.name.toLowerCase(), p.print);
+        for (const v of vs) if (v.print && v.print.length) prints.set(String(v.label).toLowerCase(), v.print);
+        for (const v of ib) {
+          if (v.print && v.print.length) prints.set(("voice " + v.id).toLowerCase(), v.print);
+          if (v.best_match) guesses.set("Voice " + v.id, v.best_match);
+        }
+        render();
+      } catch (e) { /* no data yet: hash-based glyphs */ }
+    }
+    const printOf = name => prints.get(String(name).toLowerCase());
+    const tintOf = name => `hsl(${VP.hue(printOf(name), name).toFixed(0)} 80% var(--tl))`;
+
+    let editing = false, dirty = false;
+    let settings = null, status = "";
     // committed history: [{ source, text, fresh }] — `fresh` is the tail added by the latest event
     let segments = [];
     let pending = { source: "mic", text: "" };
-    let shown = false;
+    let shown = false, lastCount = 0;
     let hideTimer = 0, fadeTimer = 0;
 
     const labeled = () => settings && settings.audio.source === "both";
@@ -113,11 +202,12 @@
     // ---------- captions ----------
     function lastSegment() { return segments[segments.length - 1]; }
 
-    function addCommitted(source, text, raw) {
+    function addCommitted(source, text, raw, speaker, name) {
       let seg = lastSegment();
-      const newSpeaker = labeled() && (!seg || seg.source !== source);
+      const newSpeaker = (labeled() && (!seg || seg.source !== source))
+        || (seg && seg.source === source && speaker != null && seg.speaker !== speaker);
       if (!seg || seg.closed || newSpeaker) {
-        seg = { source, text: "", fresh: "" };
+        seg = { source, text: "", fresh: "", speaker, name };
         segments.push(seg);
         if (segments.length > MAX_SEGMENTS) segments.splice(0, segments.length - MAX_SEGMENTS);
       }
@@ -129,14 +219,19 @@
     }
 
     function render() {
-      const box = $("text");
+      if (editing) { dirty = true; return; }
+      const box = $("lines");
+      const h0 = box.offsetHeight;
       box.textContent = "";
       const p = pending.text;
       let pendingPlaced = false;
+      const els = [];
       segments.forEach((seg, i) => {
         const el = document.createElement("p");
         el.className = "seg src-" + seg.source;
         el.dataset.tauriDragRegion = "";
+        if (seg.speaker != null) el.append(whoLabel(seg));
+        else if (labeled() && seg.source === "mic") el.append(youChip());
         const old = seg.text.slice(0, seg.text.length - seg.fresh.length);
         if (old) el.append(old);
         if (seg.fresh) el.append(span("new", seg.fresh));
@@ -145,20 +240,106 @@
           el.append(span("pending", (seg.text ? " " : "") + p));
           pendingPlaced = true;
         }
-        box.append(el);
+        els.push(el);
       });
       if (p && !pendingPlaced) {
         const el = document.createElement("p");
         el.className = "seg src-" + pending.source;
         el.dataset.tauriDragRegion = "";
         el.append(span("pending", p));
-        box.append(el);
+        els.push(el);
       }
+      // older lines dim progressively so the eye lands on the newest
+      els.forEach((el, i) => { const age = els.length - 1 - i; if (age === 1) el.classList.add("d1"); else if (age > 1) el.classList.add("d2"); box.append(el); });
+      // a new line slides up instead of jumping
+      if (!REDUCED && els.length > lastCount && h0) {
+        const delta = box.offsetHeight - h0;
+        if (delta > 0) {
+          box.style.transition = "none"; box.style.transform = `translateY(${delta}px)`;
+          box.getBoundingClientRect();
+          box.style.transition = "transform .12s ease-out"; box.style.transform = "";
+        }
+      }
+      lastCount = els.length;
+      for (const s of segments) if (!unknownName(s.name) && !prints.has(s.name.toLowerCase())) { refreshWho(); break; }
+    }
+    function youChip() {
+      const b = document.createElement("b");
+      b.className = "who you";
+      b.textContent = "You";
+      return b;
+    }
+    function whoLabel(seg) {
+      const b = document.createElement("b");
+      b.className = "who";
+      b.dataset.sp = seg.speaker;
+      const unk = unknownName(seg.name);
+      if (unk) { b.classList.add("unknown"); b.innerHTML = VP.svg(null, 18, "", true); }
+      else { b.style.setProperty("--tint", tintOf(seg.name)); b.innerHTML = VP.svg(printOf(seg.name), 18, seg.name); }
+      b.append(document.createTextNode(seg.name || "…"));
+      if (settings && !settings.click_through) {
+        b.tabIndex = 0; b.setAttribute("role", "button"); b.title = "Name this voice";
+        b.onclick = () => openPop(b, seg);
+        b.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPop(b, seg); } };
+      }
+      return b;
+    }
+
+    // ---------- naming popover ----------
+    function closePop(save, seg, name) {
+      if (!editing) return;
+      editing = false;
+      $("pop").hidden = true;
+      name = (name || "").trim();
+      if (save && name) {
+        for (const s of segments) if (s.source === seg.source && s.speaker === seg.speaker) s.name = name;
+        invoke("assign_voice", { key: "turn:" + seg.speaker, name }).then(() => setTimeout(() => refreshWho(true), 700)).catch(e => setStatus(String(e)));
+      }
+      dirty = false;
+      render();
+    }
+    async function openPop(chip, seg) {
+      if (editing) return;
+      editing = true;
+      const pop = $("pop");
+      pop.textContent = "";
+      const current = unknownName(seg.name) || /^Voice \d+$/.test(seg.name) ? "" : seg.name;
+      const guess = guesses.get(seg.name);
+      const names = peopleList.map(p => p.name);
+      const order = (guess ? [guess.name] : []).concat(names.filter(n => !guess || n !== guess.name));
+      const cap = document.createElement("div"); cap.className = "cap"; cap.textContent = "Who is speaking?";
+      const sug = document.createElement("div"); sug.className = "sug";
+      const input = document.createElement("input");
+      const finish = (save, name) => closePop(save, seg, name);
+      for (const n of [...new Set(order)].slice(0, 6)) {
+        const b = document.createElement("button"); b.type = "button";
+        const isBest = guess && guess.name === n;
+        if (isBest) b.className = "best";
+        b.innerHTML = VP.svg(printOf(n), 16, n);
+        b.append(document.createTextNode(n));
+        if (isBest) { const s = document.createElement("span"); s.className = "pct"; s.textContent = Math.round(guess.score * 100) + "%"; b.append(s); }
+        b.onmousedown = e => e.preventDefault();
+        b.onclick = () => finish(true, n);
+        sug.append(b);
+      }
+      input.placeholder = "New name, then Enter"; input.value = current; input.setAttribute("aria-label", "Name");
+      pop.append(cap); if (sug.children.length) pop.append(sug); pop.append(input);
+      pop.hidden = false;
+      const r = chip.getBoundingClientRect(), ph = pop.offsetHeight, pw = pop.offsetWidth;
+      const below = r.bottom + 6 + ph <= innerHeight - 4;
+      pop.style.top = Math.max(4, below ? r.bottom + 6 : r.top - 6 - ph) + "px";
+      pop.style.left = Math.max(8, Math.min(r.left, innerWidth - pw - 8)) + "px";
+      input.focus(); input.select();
+      input.onkeydown = e => { if (e.key === "Enter") finish(true, input.value); else if (e.key === "Escape") finish(false); };
+      input.onblur = () => setTimeout(() => { if (editing && !pop.contains(document.activeElement)) finish(false); }, 120);
     }
     function span(cls, text) { const s = document.createElement("span"); s.className = cls; s.textContent = text; return s; }
 
     listen("caption", ({ payload: c }) => {
-      if (c.committed) addCommitted(c.source, c.committed, c.raw);
+      // a later caption can carry a new name (voice recognised, or renamed): relabel the whole turn
+      if (c.speaker != null && c.speaker_name)
+        for (const s of segments) if (s.source === c.source && s.speaker === c.speaker) s.name = c.speaker_name;
+      if (c.committed) addCommitted(c.source, c.committed, c.raw, c.speaker, c.speaker_name);
       else for (const s of segments) s.fresh = "";
       pending = { source: c.source, text: c.pending || "" };
       if (c.end_of_utterance) {
@@ -168,13 +349,18 @@
       }
       render();
       refreshVisibility(Boolean(c.committed || c.pending));
+      // RT_CAPTIONS_DEBUG: report when this caption reached the next painted frame
+      if (debugOn && c.committed) requestAnimationFrame(() => invoke("debug_ack", { text: c.committed }).catch(() => {}));
     });
+    let debugOn = false;
+    invoke("debug_enabled").then(v => { debugOn = v; }).catch(() => {});
 
     // ---------- status ----------
     function setStatus(s) {
       status = s || "";
       $("status").textContent = status;
       $("status").classList.toggle("info", status.startsWith("Downloading"));
+      document.body.classList.toggle("has-status", Boolean(status));
       refreshVisibility(false);
     }
     listen("status", ({ payload }) => setStatus(payload));
@@ -184,6 +370,8 @@
       const h = String(hex || "#000000").replace("#", "").padEnd(6, "0");
       return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) || 0);
     }
+    // the stored default font names Segoe first (Windows); on macOS the native face leads
+    const fontOf = f => !f || /^Segoe UI Variable Text, Segoe UI, -apple-system/.test(f) ? NATIVE_FONT : f;
     function applySettings(s) {
       const prevLabeled = labeled();
       settings = s;
@@ -193,12 +381,17 @@
       r.setProperty("--fg", st.fg || "#ffffff");
       r.setProperty("--bg", `rgba(${R}, ${G}, ${B}, ${st.opacity ?? 0.72})`);
       r.setProperty("--size", (st.size || 30) + "px");
-      r.setProperty("--font", st.font || "system-ui, sans-serif");
+      r.setProperty("--font", fontOf(st.font));
       r.setProperty("--lines", st.lines || 3);
       r.setProperty("--mic", st.mic_color || "#fff3b0");
       r.setProperty("--sys", st.system_color || "#b8f4ff");
+      // a light panel needs dark ink for chips and glyphs
+      const lum = (0.2126 * R + 0.7152 * G + 0.0722 * B) / 255, light = lum > .6 && (st.opacity ?? .72) > .45;
+      document.body.classList.toggle("lightbg", light);
+      r.setProperty("--vp-l", light ? "38%" : "70%"); r.setProperty("--tl", light ? "30%" : "76%"); r.setProperty("--vp-s", light ? "70%" : "78%"); r.setProperty("--unk", light ? "#6c6c74" : "#b4b4bc");
       document.body.classList.toggle("labeled", s.audio.source === "both");
       document.body.classList.toggle("draggable", !s.click_through);
+      document.body.classList.toggle("editable", !s.click_through);
       if (prevLabeled !== labeled()) { segments = []; pending.text = ""; }
       render();
       refreshVisibility(false);
@@ -207,6 +400,7 @@
 
     invoke("get_settings").then(applySettings).catch(e => setStatus(String(e)));
     invoke("get_status").then(setStatus).catch(() => {});
+    refreshWho(true);
   </script>
 </body>
 </html>
