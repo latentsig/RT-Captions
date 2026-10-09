@@ -3,7 +3,7 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use crate::whistle::SAMPLE_RATE;
+use crate::asr::SAMPLE_RATE;
 use std::path::{Path, PathBuf};
 
 /// Signatures kept per person; the oldest is dropped past this.

@@ -4,11 +4,11 @@ pub mod cli;
 pub mod dsp;
 pub mod engine;
 pub mod engines;
+pub mod gguf;
 pub mod parakeet;
 pub mod people;
 pub mod settings;
 pub mod speakers;
-pub mod whistle;
 mod audio;
 
 use engine::{EngineHandle, Event};
@@ -69,16 +69,9 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
     Ok(())
 }
 
-#[derive(serde::Serialize)]
-struct EngineInfo {
-    #[serde(flatten)]
-    engine: engines::Engine,
-    installed: bool,
-}
-
 #[tauri::command]
-fn list_engines() -> Vec<EngineInfo> {
-    engines::ENGINES.iter().map(|e| EngineInfo { engine: *e, installed: engines::installed(e).is_some() }).collect()
+fn list_engines() -> Vec<engines::Model> {
+    engines::list()
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -307,7 +300,7 @@ fn discard_voice(state: State<AppState>, id: u64) -> Result<(), String> {
 fn embed_pcm(pcm: &[f32]) -> anyhow::Result<(Vec<f32>, &'static str)> {
     let spk = engines::get_any("speakers")?;
     let Some(model) = engines::installed(spk) else { anyhow::bail!("speaker model not downloaded") };
-    anyhow::ensure!(pcm.len() >= 2 * whistle::SAMPLE_RATE, "need at least 2 seconds of speech");
+    anyhow::ensure!(pcm.len() >= 2 * asr::SAMPLE_RATE, "need at least 2 seconds of speech");
     Ok((parakeet::Encoder::load(&model)?.embed(pcm)?, spk.file))
 }
 
@@ -319,7 +312,7 @@ fn add_signature(state: &State<AppState>, name: &str, pcm: &[f32]) -> Result<(),
     }
     let (vec, file) = embed_pcm(pcm).map_err(|e| format!("{e:#}"))?;
     let mut db = people::PeopleDb::load_for(file);
-    db.assign(name, vec, &people::now_secs(), pcm.len() as f32 / whistle::SAMPLE_RATE as f32);
+    db.assign(name, vec, &people::now_secs(), pcm.len() as f32 / asr::SAMPLE_RATE as f32);
     db.save().map_err(|e| format!("{e:#}"))?;
     state.engine.lock().unwrap().reload_people();
     Ok(())
@@ -353,7 +346,7 @@ fn record_signature(app: AppHandle, state: State<AppState>, name: String, second
 #[tauri::command(async)]
 fn import_signature(state: State<AppState>, name: String, bytes: Vec<u8>) -> Result<(), String> {
     let mut pcm = dsp::decode_wav_16k(&bytes).map_err(|e| format!("Not a WAV file I can read: {e:#}"))?;
-    pcm.truncate(60 * whistle::SAMPLE_RATE);
+    pcm.truncate(60 * asr::SAMPLE_RATE);
     add_signature(&state, &name, &pcm)
 }
 

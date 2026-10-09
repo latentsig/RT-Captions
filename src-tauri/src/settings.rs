@@ -44,6 +44,11 @@ pub fn path() -> PathBuf {
 
 pub fn load() -> Settings {
     let mut s: Settings = std::fs::read_to_string(path()).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    // An engine that no longer exists (removed from the catalogue, or a local model file that
+    // was deleted) falls back to the default instead of failing to load.
+    if !crate::engines::exists(&s.audio.engine) {
+        s.audio.engine = crate::engines::DEFAULT.into();
+    }
     // Files from older versions lack newer style keys: fill them from the defaults.
     if let (Value::Object(have), Value::Object(defaults)) = (&mut s.style, Settings::default().style) {
         for (k, v) in defaults {

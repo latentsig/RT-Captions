@@ -8,7 +8,7 @@
 use crate::engines;
 use crate::parakeet::{Diarizer, Encoder, Segment};
 use crate::people::{self, cosine, now_secs, now_u64, PeopleDb, Who};
-use crate::whistle::SAMPLE_RATE;
+use crate::asr::SAMPLE_RATE;
 use anyhow::{anyhow, bail, Result};
 use serde::Serialize;
 use std::sync::mpsc::{channel, Sender};

@@ -2,7 +2,7 @@
 //! Offline models (Redux) decode a whole clip per call; cache-aware streaming models
 //! (Nemotron) take audio a piece at a time through `stream_feed`.
 
-use crate::whistle::{Word, SAMPLE_RATE};
+use crate::asr::{Word, SAMPLE_RATE};
 use anyhow::{anyhow, bail, Context, Result};
 use libloading::Library;
 use serde::Deserialize;
@@ -55,6 +55,10 @@ pub struct Parakeet {
     streams: Vec<*mut c_void>,
     /// Language prompt for new streaming sessions ("en", "hi", "auto").
     lang: CString,
+    /// parakeet_capi_set_decode_options (our fork's patch); None with an upstream library.
+    set_decode_options: Option<unsafe extern "C" fn(*const c_char, f32, f32)>,
+    /// parakeet_capi_set_suppressed_tokens (our fork's patch).
+    set_suppressed: Option<unsafe extern "C" fn(*const c_int, c_int)>,
 }
 
 // The context is only ever used from the engine thread that owns it.
@@ -110,6 +114,8 @@ impl Parakeet {
                 stream_free,
                 shutdown_backend,
                 streams: Vec::new(),
+                set_decode_options: lib.get::<unsafe extern "C" fn(*const c_char, f32, f32)>(b"parakeet_capi_set_decode_options\0").ok().map(|f| *f),
+                set_suppressed: lib.get::<unsafe extern "C" fn(*const c_int, c_int)>(b"parakeet_capi_set_suppressed_tokens\0").ok().map(|f| *f),
                 lang: c"en".to_owned(),
                 ctx,
                 _lib: lib,
@@ -189,6 +195,24 @@ impl Parakeet {
 
     /// Language for streaming sessions started from now on (call `reset_streams` to apply).
     /// Only English and Hindi are offered: "auto" would let the model drift into 40 languages.
+    /// Decoder for hybrid *_ctc models ("ctc" or "rnnt") and blank penalties, process-wide in
+    /// the library; affects streams begun afterwards. Needs our parakeet.cpp fork.
+    pub fn set_decoding(&mut self, stream_decoder: &str, rnnt_blank_penalty: f32, ctc_blank_penalty: f32) -> Result<()> {
+        let Some(f) = self.set_decode_options else {
+            bail!("this libparakeet has no decode options (build it from latentsig/parakeet.cpp, branch rt-captions)");
+        };
+        let dec = CString::new(stream_decoder)?;
+        unsafe { f(dec.as_ptr(), rnnt_blank_penalty, ctc_blank_penalty) };
+        Ok(())
+    }
+
+    /// Token ids the decoder may never emit (empty = no restriction). Needs our fork.
+    pub fn set_suppressed(&mut self, ids: &[i32]) {
+        if let Some(f) = self.set_suppressed {
+            unsafe { f(ids.as_ptr(), ids.len() as c_int) };
+        }
+    }
+
     pub fn set_language(&mut self, lang: &str) {
         self.lang = if lang == "hi" { c"hi".to_owned() } else { c"en".to_owned() };
     }

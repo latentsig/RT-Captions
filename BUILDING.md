@@ -10,7 +10,6 @@ ends with a check. Tested on Windows 11 x64 and macOS 15.6 on Apple Silicon.
 | `rt-captions-app` | Rust + Tauri 2 (`src-tauri/`) | the app: settings window, caption overlay, tray |
 | `rt-captions` | same crate | console CLI; opens the app when run with no arguments |
 | `libparakeet` | [parakeet.cpp](https://github.com/mudler/parakeet.cpp), built from source at a pinned commit | runs Nemotron, Parakeet Redux/Ultra |
-| `libneedle` | Cactus's official prebuilt wheel | runs Cactus Whistle |
 | models | downloaded by the app on first use (Hugging Face) | 17 MB to 1 GB each; not in the repo |
 
 `src-tauri/scripts/setup-engines.mjs` fetches and builds the two native libraries into
@@ -33,9 +32,9 @@ cargo install tauri-cli --version "^2" --locked
 git clone https://github.com/latentsig/RT-Captions.git
 cd RT-Captions
 
-# 3. Engine libraries. This builds parakeet.cpp with Metal and downloads libneedle.
+# 3. Engine libraries. This builds parakeet.cpp with Metal.
 node src-tauri/scripts/setup-engines.mjs
-# check: ls src-tauri/engine/macos  ->  libneedle.dylib  libparakeet.dylib
+# check: ls src-tauri/engine/macos  ->  libparakeet.dylib
 # check: otool -L src-tauri/engine/macos/libparakeet.dylib
 #        shows its @rpath install name and Apple system libraries, with no engine/.build paths
 
@@ -83,7 +82,7 @@ cargo install tauri-cli --version "^2" --locked
 git clone https://github.com/latentsig/RT-Captions.git
 cd RT-Captions
 node src-tauri/scripts/setup-engines.mjs
-# check: src-tauri\engine\windows has libparakeet.dll libc++.dll libomp.dll libunwind.dll libneedle.dll
+# check: src-tauri\engine\windows has libparakeet.dll libc++.dll libomp.dll libunwind.dll
 
 # 3. Tests and installer
 cd src-tauri
@@ -97,7 +96,7 @@ download on first use.
 
 ## For agents
 
-- Do not commit `src-tauri/engine/`, `src-tauri/binaries/`, models (`*.gguf`, `*.cact`) or audio.
+- Do not commit `src-tauri/engine/`, `src-tauri/binaries/`, models (`*.gguf`) or audio.
 - `cargo tauri build` builds both Cargo binaries and packages `rt-captions` with the app.
 - Verify a change with the CLI instead of the GUI: `rt-captions bench clip.wav --ref @reference.txt`
   prints WER, word latency (p50/p95) and engine load; `rt-captions --help` lists everything.

@@ -1,6 +1,6 @@
 //! Device audio -> 16 kHz mono, optionally through RNNoise (which works at 48 kHz).
 
-use crate::whistle::SAMPLE_RATE;
+use crate::asr::SAMPLE_RATE;
 use nnnoiseless::DenoiseState;
 use rubato::{FftFixedIn, Resampler};
 

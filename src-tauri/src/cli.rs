@@ -8,7 +8,7 @@ use crate::asr::Asr;
 use crate::parakeet;
 use crate::people::{self, PeopleDb};
 use crate::engines::{self, Kind};
-use crate::whistle::{Word, SAMPLE_RATE};
+use crate::asr::{Word, SAMPLE_RATE};
 use anyhow::{bail, Context, Result};
 use std::time::{Duration, Instant};
 
@@ -43,9 +43,11 @@ USAGE
   rt-captions uninstall-cli            take it off again
 
 KEYS (rt-captions settings shows all)
-  audio.engine  nemotron-q4|nemotron-q8|ultra|redux|whistle
+  audio.engine  nemotron-q4|nemotron-q8|ultra|redux|<model file in the models folder>
+  audio.decoder  rnnt|ctc  audio.blank_penalty  0.5  audio.ctc_blank_penalty  0.5   (hybrid models)
+  audio.nemotron_blank_penalty  1.0
   audio.mode  low|balanced|performance   audio.language  en|hi (Nemotron)
-  audio.source  mic|system|both       audio.rnnoise  true|false        audio.keywords  \"Claude\\nFathom\"
+  audio.source  mic|system|both       audio.rnnoise  true|false
   audio.skip_silence  true|false      audio.speakers  true|false (label voices, system audio)
   audio.speaker_threshold  0.6        cosine needed to name a known voice
   audio.stream.window_s  3            audio.stream.hop_s  0.25          audio.stream.finalize_s  2
@@ -95,7 +97,8 @@ pub fn run(args: Vec<String>) -> Result<()> {
             if flag("--speakers") {
                 return transcribe_speakers(&mut asr, path, rnnoise);
             }
-            let run = run_file(&mut asr, path, &cfg, rnnoise)?;
+            let block = opt("--block").map(|b| b.parse()).transpose()?.unwrap_or(1600);
+            let run = run_file(&mut asr, path, &cfg, rnnoise, block)?;
             if flag("--json") {
                 println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "text": run.text(), "words": run.words, "lag_s": run.commit_lag }))?);
             } else {
@@ -112,11 +115,13 @@ pub fn run(args: Vec<String>) -> Result<()> {
         Some("doctor") => doctor(),
         Some("engines") => {
             let cur = settings::load().audio.engine;
-            for e in engines::ENGINES {
-                let mark = if e.id == cur { "*" } else { " " };
-                let state = if engines::installed(e).is_some() { "downloaded" } else { "not downloaded" };
-                println!("{mark} {:12} {:28} {:>5} MB  {:9}  {:15} {}", e.id, e.name, e.bytes / 1_000_000,
-                         format!("{:?}", e.kind).to_lowercase(), state, e.blurb);
+            for m in engines::list() {
+                let mark = if m.id == cur { "*" } else { " " };
+                let state = if !m.known { "local file" } else if m.installed { "downloaded" } else { "not downloaded" };
+                println!("{mark} {:16} {:30} {:>5} MB  {:14}  {}", m.id, m.name, m.bytes / 1_000_000, state, m.specs);
+                if m.known {
+                    println!("    {}", m.blurb);
+                }
             }
             Ok(())
         }
@@ -413,6 +418,11 @@ pub struct FileRun {
     pub commit_lag: Vec<f64>,
     pub busy_s: f64,
     pub duration_s: f64,
+    /// Streaming: feeds that took longer than the audio they carried (audio queues up behind
+    /// them; this is what stretches the p99 tail).
+    pub over_budget: usize,
+    /// Streaming: audio per feed, in samples (the app's batch size).
+    pub block: usize,
 }
 
 impl FileRun {
@@ -429,8 +439,12 @@ fn load_asr(opt: &dyn Fn(&str) -> Option<String>) -> Result<Asr> {
     let engine = opt("--engine").unwrap_or(s.engine.clone());
     let threads = opt("--threads").map(|t| t.parse()).transpose()?.unwrap_or(engine::effective_threads(&s));
     let mut asr = Asr::load(&engine, threads)?;
-    asr.set_keywords(&s.keywords);
     asr.set_language(&opt("--language").unwrap_or(s.language.clone()));
+    let num = |k: &str, d: f64| opt(k).map_or(Ok(d), |v| v.parse::<f64>());
+    // --blank-penalty sets the loaded model's own penalty (hybrid or Nemotron).
+    let pen = num("--blank-penalty", if asr.hybrid() { s.blank_penalty } else { s.nemotron_blank_penalty })?;
+    asr.set_decoding(&opt("--decoder").unwrap_or(s.decoder.clone()), pen, num("--ctc-blank-penalty", s.ctc_blank_penalty)?, pen);
+    asr.reset_streams();
     Ok(asr)
 }
 
@@ -450,27 +464,30 @@ fn read_wav_16k(path: &str, rnnoise: bool) -> Result<Vec<f32>> {
     Ok(Dsp::new(spec.sample_rate as usize, rnnoise).process(mono))
 }
 
-pub fn run_file(whistle: &mut Asr, path: &str, cfg: &StreamConfig, rnnoise: bool) -> Result<FileRun> {
+/// `block`: samples per streaming feed (the app batches 1600 = 100 ms).
+pub fn run_file(asr: &mut Asr, path: &str, cfg: &StreamConfig, rnnoise: bool, block: usize) -> Result<FileRun> {
     let audio = read_wav_16k(path, rnnoise)?;
     let duration_s = audio.len() as f64 / SAMPLE_RATE as f64;
 
-    let mut run = FileRun { words: Vec::new(), passes_ms: Vec::new(), commit_lag: Vec::new(), busy_s: 0.0, duration_s };
-    if whistle.kind() == Kind::Streaming {
+    let mut run = FileRun { words: Vec::new(), passes_ms: Vec::new(), commit_lag: Vec::new(), busy_s: 0.0, duration_s, over_budget: 0, block };
+    if asr.kind() == Kind::Streaming {
         // Streaming: 160 ms blocks arrive in real time; each feed holds the engine for its wall time.
-        whistle.reset_streams();
+        asr.reset_streams();
         let mut clock = 0.0f64;
-        let block = 2560;
         let pieces = audio.chunks(block).count();
         for (k, piece) in audio.chunks(block).chain(std::iter::once(&[0.0f32; 19_200][..])).enumerate() {
             clock = clock.max(((k + 1) * block).min(audio.len() + 19_200) as f64 / SAMPLE_RATE as f64);
             let t = Instant::now();
-            let (_, mut words) = whistle.stream_feed(0, piece)?;
+            let (_, mut words) = asr.stream_feed(0, piece)?;
             if k == pieces {
-                words.extend(whistle.stream_finish(0)?.1);
+                words.extend(asr.stream_finish(0)?.1);
             }
             let el = t.elapsed().as_secs_f64();
             run.passes_ms.push(el * 1000.0);
             run.busy_s += el;
+            if el > piece.len() as f64 / SAMPLE_RATE as f64 {
+                run.over_budget += 1;
+            }
             clock += el;
             for w in words {
                 run.commit_lag.push(clock - w.end);
@@ -493,7 +510,7 @@ pub fn run_file(whistle: &mut Asr, path: &str, cfg: &StreamConfig, rnnoise: bool
         let mut ran = false;
         let update = cap.step(|b| {
             ran = true;
-            whistle.transcribe(b).unwrap_or_default()
+            asr.transcribe(b).unwrap_or_default()
         });
         if ran {
             let el = t.elapsed().as_secs_f64();
@@ -554,19 +571,36 @@ fn bench(args: &[String], opt: &dyn Fn(&str) -> Option<String>) -> Result<()> {
     println!("{path}  engine={}  rnnoise={rnnoise}", opt("--engine").unwrap_or(settings::load().audio.engine));
     let streaming = asr.kind() == Kind::Streaming;
     if streaming {
-        println!("(streaming engine: window/hop do not apply; 'pass' is one 160 ms feed)");
+        println!("(streaming engine: window/hop do not apply; --block sets samples per feed, default 1600 = the app's 100 ms)");
     }
-    println!("{:>7} {:>6} {:>14} {:>16} {:>6} {:>7}", "window", "hop", "pass p50/p95", "solid p50/p95", "busy", "WER");
+    if streaming {
+        println!("{:>6} {:>16} {:>22} {:>7} {:>6} {:>7}", "block", "chunk ms p50/p95/max", "delay s p50/p95/p99", "queued", "busy", "WER");
+    } else {
+        println!("{:>7} {:>6} {:>14} {:>16} {:>6} {:>7}", "window", "hop", "pass p50/p95", "solid p50/p95", "busy", "WER");
+    }
     for w in windows {
         let mut cfg = base.clone();
         apply_stream_flags(&mut cfg, &Some(w), &opt("--hop"))?;
-        let run = run_file(&mut asr, path, &cfg, rnnoise)?;
+        let block = opt("--block").map(|b| b.parse()).transpose()?.unwrap_or(1600);
+        let run = run_file(&mut asr, path, &cfg, rnnoise, block)?;
         let wer = reference.as_ref().map_or("-".into(), |r| format!("{:.1}%", 100.0 * wer(r, &norm_words(&run.text()))));
-        println!(
-            "{:>6}s {:>5}s {:>6.0}/{:<4.0}ms {:>6.2}/{:<5.2}s {:>5.0}% {:>7}",
-            cfg.window_s, cfg.hop_s, pct(&run.passes_ms, 0.5), pct(&run.passes_ms, 0.95),
-            pct(&run.commit_lag, 0.5), pct(&run.commit_lag, 0.95), 100.0 * run.busy_s / run.duration_s, wer
-        );
+        let busy = 100.0 * run.busy_s / run.duration_s;
+        if streaming {
+            // compute of the feeds that ran the encoder (the rest just buffer audio)
+            let chunks: Vec<f64> = run.passes_ms.iter().copied().filter(|&ms| ms > 2.0).collect();
+            println!(
+                "{:>4}ms {:>5.0}/{:<4.0}/{:<5.0} {:>7.2}/{:<5.2}/{:<6.2}  {:>3}/{:<4} {:>4.0}% {:>7}",
+                run.block * 1000 / SAMPLE_RATE, pct(&chunks, 0.5), pct(&chunks, 0.95), pct(&chunks, 1.0),
+                pct(&run.commit_lag, 0.5), pct(&run.commit_lag, 0.95), pct(&run.commit_lag, 0.99),
+                run.over_budget, run.passes_ms.len(), busy, wer
+            );
+        } else {
+            println!(
+                "{:>6}s {:>5}s {:>6.0}/{:<4.0}ms {:>6.2}/{:<5.2}s {:>5.0}% {:>7}",
+                cfg.window_s, cfg.hop_s, pct(&run.passes_ms, 0.5), pct(&run.passes_ms, 0.95),
+                pct(&run.commit_lag, 0.5), pct(&run.commit_lag, 0.95), busy, wer
+            );
+        }
         if args.iter().any(|a| a == "--text") {
             println!("  {}", run.text());
         }

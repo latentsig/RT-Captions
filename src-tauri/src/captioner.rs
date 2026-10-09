@@ -6,7 +6,7 @@
 //! half-heard. When the window rolls, the cut snaps back to the start of the word that
 //! straddles it, so that word is re-read whole. An energy gate skips inference in silence.
 
-use crate::whistle::{Word, SAMPLE_RATE};
+use crate::asr::{Word, SAMPLE_RATE};
 use serde::{Deserialize, Serialize};
 
 const SR: f64 = SAMPLE_RATE as f64;

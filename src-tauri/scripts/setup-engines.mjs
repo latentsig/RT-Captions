@@ -1,6 +1,6 @@
 // Builds/fetches the native speech-engine libraries the app bundles, for this OS:
-//   engine/macos/   libparakeet.dylib, libneedle.dylib
-//   engine/windows/ libparakeet.dll (+ libc++.dll, libomp.dll, libunwind.dll), libneedle.dll
+//   engine/macos/   libparakeet.dylib
+//   engine/windows/ libparakeet.dll (+ libc++.dll, libomp.dll, libunwind.dll)
 //
 //   node src-tauri/scripts/setup-engines.mjs [--force]
 //
@@ -17,9 +17,10 @@ import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFi
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const PARAKEET_REPO = "https://github.com/mudler/parakeet.cpp";
-const PARAKEET_COMMIT = "2f9e8eacc54f19d2e5b6d5ae3b97b96f708da3cd"; // tested Oct 2026
-const NEEDLE_VERSION = "3.2.0";
+// Our fork of mudler/parakeet.cpp, branch rt-captions: upstream @2f9e8ea plus our patches
+// (streaming CTC decoding for hybrid models, RNN-T/CTC blank penalties; see the branch log).
+const PARAKEET_REPO = "https://github.com/latentsig/parakeet.cpp";
+const PARAKEET_COMMIT = "c10a59916fbb00719f609d3299dff50063cb3a71"; // branch rt-captions
 const LLVM_MINGW = "llvm-mingw-20260922-ucrt-x86_64";
 
 const root = fileURLToPath(new URL("..", import.meta.url)); // src-tauri
@@ -45,23 +46,12 @@ async function download(url, dest) {
   writeFileSync(dest, Buffer.from(await res.arrayBuffer()));
 }
 
-// 1. Cactus needle engine (runs Whistle): prebuilt, from Cactus's official wheel.
-const needleOut = join(out, mac ? "libneedle.dylib" : "libneedle.dll");
-if (force || !existsSync(needleOut)) {
-  const tag = mac ? (process.arch === "arm64" ? "macosx_11_0_arm64" : "macosx_11_0_x86_64") : "win_amd64";
-  const wheel = join(work, "needle.whl");
-  await download(`https://huggingface.co/Cactus-Compute/needle3/resolve/main/python/cactus_needle-${NEEDLE_VERSION}-py3-none-${tag}.whl`, wheel);
-  const member = `needle/libneedle3.${mac ? "dylib" : "dll"}`;
-  run(TAR, ["-xf", "needle.whl", member], { cwd: work }); // a wheel is a zip
-  renameSync(join(work, member), needleOut);
-  console.log(`-> ${needleOut}`);
-}
-
-// 2. parakeet.cpp (runs Nemotron, Parakeet Redux/Ultra): built from source at a pinned commit.
+// parakeet.cpp (runs Nemotron, Parakeet Redux/Ultra): built from source at a pinned commit.
 const parakeetOut = join(out, mac ? "libparakeet.dylib" : "libparakeet.dll");
 if (force || !existsSync(parakeetOut)) {
   const src = join(work, "parakeet.cpp");
   if (!existsSync(join(src, ".git"))) run("git", ["clone", PARAKEET_REPO, src]);
+  run("git", ["remote", "set-url", "origin", PARAKEET_REPO], { cwd: src }); // older checkouts point at upstream
   run("git", ["fetch", "origin", PARAKEET_COMMIT], { cwd: src });
   run("git", ["checkout", "--force", PARAKEET_COMMIT], { cwd: src });
   run("git", ["submodule", "update", "--init", "--recursive"], { cwd: src });

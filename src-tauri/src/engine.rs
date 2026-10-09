@@ -1,4 +1,4 @@
-//! The one thread that owns Whistle: capture -> dsp -> captioner(s) -> events.
+//! The one thread that owns the speech model: capture -> dsp -> captioner(s) -> events.
 //! "both" runs a captioner per source on the shared engine, so captions keep their source label.
 
 use crate::captioner::{join, Captioner, StreamConfig};
@@ -22,9 +22,16 @@ pub struct AudioSettings {
     pub mode: String,
     /// Spoken language for Nemotron: "en" | "hi" (other engines are English-only).
     pub language: String,
+    /// Hybrid RNN-T/CTC models: "rnnt" (default: better on Hindi, Hinglish and conversation) or
+    /// "ctc" (cheaper; only better on clean English). Other models use their own decoder.
+    pub decoder: String,
+    /// Subtracted from the blank score before each decision; > 0 counters dropped words, too high
+    /// adds stray ones. Hybrid models (0.5, picked on 17 eval sets):
+    pub blank_penalty: f64,
+    pub ctc_blank_penalty: f64,
+    /// Nemotron (1.0: WER 16.7 -> 12.0% / 22.8 -> 21.5% on two meeting clips vs 0).
+    pub nemotron_blank_penalty: f64,
     pub rnnoise: bool,
-    /// Newline-separated words and phrases to favour (names, jargon).
-    pub keywords: String,
     /// Streaming engines: feed only what the loudness detector calls speech. Off (default): feed
     /// everything and let the model decide; with the model on the GPU this costs little and
     /// quiet or distant voices are not lost.
@@ -38,7 +45,7 @@ pub struct AudioSettings {
 
 impl Default for AudioSettings {
     fn default() -> Self {
-        Self { source: "both".into(), engine: engines::DEFAULT.into(), threads: 0, mode: "balanced".into(), language: "en".into(), rnnoise: false, keywords: String::new(), skip_silence: false, speakers: true, speaker_threshold: 0.6, stream: StreamConfig::default() }
+        Self { source: "both".into(), engine: engines::DEFAULT.into(), threads: 0, mode: "balanced".into(), language: "en".into(), decoder: "rnnt".into(), blank_penalty: 0.5, ctc_blank_penalty: 0.5, nemotron_blank_penalty: 1.0, rnnoise: false, skip_silence: false, speakers: true, speaker_threshold: 0.6, stream: StreamConfig::default() }
     }
 }
 
@@ -359,8 +366,8 @@ const BATCH: usize = if cfg!(target_os = "macos") { 320 } else { 1_600 };
 
 /// Runs until new settings arrive (returned) or the app goes away (None).
 fn session(asr: &mut Asr, s: &AudioSettings, rx: &Receiver<Msg>, emit: &impl Fn(Event)) -> Option<AudioSettings> {
-    asr.set_keywords(&s.keywords);
     asr.set_language(&s.language);
+    asr.set_decoding(&s.decoder, s.blank_penalty, s.ctc_blank_penalty, s.nemotron_blank_penalty);
     asr.reset_streams();
     let streaming = asr.kind() == Kind::Streaming;
     // Never update faster than the engine can keep up with (a slow pass would build a backlog).

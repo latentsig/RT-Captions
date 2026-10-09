@@ -241,9 +241,12 @@
     .mt { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--muted); }
     .mt i { display: inline-block; width: 7px; height: 4px; border-radius: 1px; background: var(--track); margin-left: -2px; }
     .mt i.on { background: var(--text); opacity: .75; }
+    .eng .specs { grid-column: 2 / 4; font: 10.5px var(--mono); }
     .eng .bar { grid-column: 2 / 4; height: 4px; border-radius: 2px; background: var(--track); overflow: hidden; margin-top: 6px; }
     .eng .bar > i { display: block; height: 100%; background: var(--accent); width: 0; }
     body.streaming .rolling-only { display: none; }
+    body:not(.has-ctc) .ctc-only { display: none; }
+    body.has-ctc .nemo-only, body:not(.streaming) .nemo-only { display: none; }
 
     /* appearance preview: the real overlay's CSS, scoped */
     .stage { position: sticky; top: -1px; z-index: 3; border-radius: 14px; padding: 26px 18px 18px; background: #55627d; box-shadow: 0 0 0 1px var(--hair), 0 8px 22px rgba(0, 0, 0, .12); overflow: hidden; }
@@ -406,8 +409,23 @@
             <button type="button" role="radio" data-value="performance">Performance</button>
           </div>
         </div>
+        <div class="row ctc-only">
+          <div><span class="label" id="l-dec">Decoder</span><span class="hint">RNN-T is more accurate, especially for Hindi; CTC uses a little less CPU</span></div>
+          <div class="seg" role="radiogroup" aria-labelledby="l-dec" data-key="audio.decoder">
+            <button type="button" role="radio" data-value="rnnt">RNN-T</button>
+            <button type="button" role="radio" data-value="ctc">CTC</button>
+          </div>
+        </div>
+        <div class="row ctc-only">
+          <label class="lbl" for="blankpen"><span class="label">Blank penalty</span><span class="hint">Raise if words go missing; too high adds stray words</span></label>
+          <div class="ctl"><input type="range" id="blankpen" data-key="audio.blank_penalty" min="0" max="2" step="0.1" data-fmt="raw"><output for="blankpen"></output></div>
+        </div>
+        <div class="row nemo-only">
+          <label class="lbl" for="nemopen"><span class="label">Blank penalty</span><span class="hint">Raise if words go missing; too high adds stray words</span></label>
+          <div class="ctl"><input type="range" id="nemopen" data-key="audio.nemotron_blank_penalty" min="0" max="2" step="0.1" data-fmt="raw"><output for="nemopen"></output></div>
+        </div>
         <div class="row">
-          <div><span class="label" id="l-lang">Language</span><span class="hint">Nemotron only; the other engines are English-only</span></div>
+          <div><span class="label" id="l-lang">Language</span><span class="hint">English keeps captions in English letters; Hindi allows Hindi script and Hinglish</span></div>
           <div class="seg" role="radiogroup" aria-labelledby="l-lang" data-key="audio.language">
             <button type="button" role="radio" data-value="en">English</button>
             <button type="button" role="radio" data-value="hi">Hindi</button>
@@ -420,10 +438,6 @@
         <div class="row">
           <label class="lbl" for="skipsilence"><span class="label">Skip silence</span><span class="hint">Saves battery, but can miss quiet or distant voices</span></label>
           <input type="checkbox" class="switch" role="switch" id="skipsilence" data-key="audio.skip_silence">
-        </div>
-        <div class="row stack">
-          <label class="lbl" for="keywords"><span class="label">Keywords</span><span class="hint">Names and terms to recognise, one per line</span></label>
-          <textarea id="keywords" data-key="audio.keywords" spellcheck="false" placeholder="Intelehealth&#10;Dr. Nikesh&#10;Shaurya"></textarea>
         </div>
       </div>
 
@@ -842,10 +856,12 @@
   // ---------- engines ----------
   let engines = [], progress = {};
   // speed / accuracy out of 5, from the measured notes in the engine catalogue
-  const RATING = { "nemotron-q4": [5, 3], "nemotron-q8": [4, 4], ultra: [2, 5], redux: [3, 3], whistle: [5, 2] };
+  const RATING = { "nemotron-q4": [5, 3], "nemotron-q8": [4, 4], ultra: [2, 5], redux: [3, 3] };
   const mb = b => b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : Math.round(b / 1e6) + " MB";
   const meter = (label, n) => { const m = el("span", "mt", label); m.setAttribute("aria-label", `${label} ${n} of 5`); for (let i = 0; i < 5; i++) m.append(el("i", i < n ? "on" : "")); return m; };
   async function loadEngines() { engines = await invoke("list_engines"); renderEngines(); }
+  // Model files dropped into the models folder show up without a restart: re-scan on return.
+  window.addEventListener("focus", () => loadEngines().catch(() => {}));
   function renderEngines() {
     const box = $("engines");
     box.textContent = "";
@@ -858,7 +874,9 @@
       const busy = p && !p.finished;
       b.innerHTML = `<span class="tick"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5.3l2.2 2.2L8 3"/></svg></span><span class="nm"></span><span class="state"></span><span class="hint"></span>`;
       b.querySelector(".nm").textContent = e.name;
-      b.querySelector(".hint").textContent = e.blurb;
+      b.querySelector(".hint").textContent = e.known ? e.blurb : `${e.blurb} · ${e.file}`;
+      // what the model file says about itself: quantization, streaming look-ahead, languages
+      if (e.specs) b.append(el("span", "hint specs", e.specs));
       const st = b.querySelector(".state");
       st.textContent = busy ? `${Math.floor(p.done * 100 / p.total)}%` : e.installed ? mb(e.bytes) : `Download · ${mb(e.bytes)}`;
       if (!e.installed && !busy) st.classList.add("get");
@@ -869,7 +887,9 @@
       b.addEventListener("focusin", () => showCli("audio.engine"));
       box.append(b);
     }
-    document.body.classList.toggle("streaming", (engines.find(e => e.id === cur) || {}).kind === "streaming");
+    const sel = engines.find(e => e.id === cur) || {};
+    document.body.classList.toggle("streaming", sel.kind === "streaming");
+    document.body.classList.toggle("has-ctc", Boolean(sel.ctc));
   }
   function pickEngine(e) {
     if (!e.installed && !(progress[e.id] && !progress[e.id].finished)) {

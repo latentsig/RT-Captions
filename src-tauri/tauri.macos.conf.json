@@ -1,8 +1,7 @@
 {
   "bundle": {
     "resources": {
-      "engine/macos/libparakeet.dylib": "engine/libparakeet.dylib",
-      "engine/macos/libneedle.dylib": "engine/libneedle.dylib"
+      "engine/macos/libparakeet.dylib": "engine/libparakeet.dylib"
     },
     "macOS": {
       "minimumSystemVersion": "13.0",

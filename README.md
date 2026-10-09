@@ -19,12 +19,10 @@ Measured live on real accented meeting audio (5 min, 3 speakers), Intel i5-12450
 | Nemotron streaming 8-bit | streaming | 984 MB | ~15% | ~0.3-0.6 s |
 | Parakeet Ultra | rolling window | 942 MB | ~17-21% live (11% offline) | ~1.8-3 s |
 | Parakeet Redux | rolling window | 213 MB | ~20% | ~1 s |
-| Cactus Whistle | rolling window | 17 MB | ~32% | ~0.35 s |
 
 Streaming engines process each piece of audio once; rolling-window engines re-transcribe the last
 few seconds on every update (grey preview words, then solid). Silence is never sent to a model.
-Engines run through [parakeet.cpp](https://github.com/mudler/parakeet.cpp) (MIT) and Cactus needle
-(Apache-2.0); models come from their Hugging Face repos.
+Engines run through [parakeet.cpp](https://github.com/mudler/parakeet.cpp) (MIT); models come from their Hugging Face repos.
 
 ## CLI
 
