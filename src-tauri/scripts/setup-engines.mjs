@@ -17,10 +17,10 @@ import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFi
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Our fork of mudler/parakeet.cpp, branch rt-captions: upstream @2f9e8ea plus our patches
+// Our fork of mudler/parakeet.cpp, branch rt-captions: upstream master @5c9b0fb plus our patches
 // (streaming CTC decoding for hybrid models, RNN-T/CTC blank penalties; see the branch log).
 const PARAKEET_REPO = "https://github.com/latentsig/parakeet.cpp";
-const PARAKEET_COMMIT = "2772c6c1c4c1093f47dffa4aeea953e11d6f3f6d"; // branch rt-captions
+const PARAKEET_COMMIT = "59a6d414298a7ec3b7d5addb0843ca7fbad2cea7"; // branch rt-captions
 const LLVM_MINGW = "llvm-mingw-20260922-ucrt-x86_64";
 
 const root = fileURLToPath(new URL("..", import.meta.url)); // src-tauri
