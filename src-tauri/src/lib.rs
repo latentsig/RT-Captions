@@ -5,6 +5,7 @@ pub mod dsp;
 pub mod engine;
 pub mod engines;
 pub mod gguf;
+pub mod hotwords;
 pub mod parakeet;
 pub mod people;
 pub mod settings;

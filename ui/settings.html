@@ -247,6 +247,7 @@
     body.streaming .rolling-only { display: none; }
     body:not(.has-ctc) .ctc-only { display: none; }
     body.has-ctc .nemo-only, body:not(.streaming) .nemo-only { display: none; }
+    body:not(.dec-ctc) .ctcdec-only { display: none; }
 
     /* appearance preview: the real overlay's CSS, scoped */
     .stage { position: sticky; top: -1px; z-index: 3; border-radius: 14px; padding: 26px 18px 18px; background: #55627d; box-shadow: 0 0 0 1px var(--hair), 0 8px 22px rgba(0, 0, 0, .12); overflow: hidden; }
@@ -410,7 +411,7 @@
           </div>
         </div>
         <div class="row ctc-only">
-          <div><span class="label" id="l-dec">Decoder</span><span class="hint">RNN-T is more accurate, especially for Hindi; CTC uses a little less CPU</span></div>
+          <div><span class="label" id="l-dec">Decoder</span><span class="hint">RNN-T is better for Hindi; CTC is a little cheaper and enables beam search and words to recognise</span></div>
           <div class="seg" role="radiogroup" aria-labelledby="l-dec" data-key="audio.decoder">
             <button type="button" role="radio" data-value="rnnt">RNN-T</button>
             <button type="button" role="radio" data-value="ctc">CTC</button>
@@ -419,6 +420,17 @@
         <div class="row ctc-only">
           <label class="lbl" for="blankpen"><span class="label">Blank penalty</span><span class="hint">Raise if words go missing; too high adds stray words</span></label>
           <div class="ctl"><input type="range" id="blankpen" data-key="audio.blank_penalty" min="0" max="2" step="0.1" data-fmt="raw"><output for="blankpen"></output></div>
+        </div>
+        <div class="row ctc-only ctcdec-only">
+          <div><span class="label" id="l-beam">Beam search</span><span class="hint">Weighs several readings before finalizing: slightly more accurate; the last word or two stay grey ~0.3 s longer</span></div>
+          <div class="seg" role="radiogroup" aria-labelledby="l-beam" data-key="audio.beam" data-num>
+            <button type="button" role="radio" data-value="0">Off</button>
+            <button type="button" role="radio" data-value="8">On</button>
+          </div>
+        </div>
+        <div class="row stack ctc-only ctcdec-only">
+          <label class="lbl" for="hotwords"><span class="label">Words to recognise</span><span class="hint">Names and terms the captions should get right, one per line (e.g. jaundice, a colleague's name). Also fixes near-miss spellings</span></label>
+          <textarea id="hotwords" data-key="audio.hotwords" data-list rows="3" spellcheck="false" placeholder="jaundice"></textarea>
         </div>
         <div class="row nemo-only">
           <label class="lbl" for="nemopen"><span class="label">Blank penalty</span><span class="hint">Raise if words go missing; too high adds stray words</span></label>
@@ -616,7 +628,9 @@
       default: return String(v);
     }
   };
-  const cliValue = v => typeof v === "string" ? JSON.stringify(v) : String(v);
+  const cliValue = v => typeof v === "string" ? JSON.stringify(v) : typeof v === "object" ? `'${JSON.stringify(v)}'` : String(v);
+  // Beam search and words to recognise only apply with the CTC decoder.
+  const syncDecoder = () => document.body.classList.toggle("dec-ctc", Boolean(settings) && settings.audio.decoder === "ctc");
     // ---------- voiceprint: a glyph drawn from the voice signature (24 radial bars; hue from the vector) ----------
     const VP = (() => {
       const hash = s => { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.codePointAt(0), 16777619) >>> 0; return h; };
@@ -749,6 +763,7 @@
   const pct = el => el.style.setProperty("--pct", ((el.value - el.min) / (el.max - el.min) * 100) + "%");
   function render(s) {
     settings = s;
+    syncDecoder();
     for (const el of controls) {
       const key = el.dataset.key;
       const v = get(s, key);
@@ -772,7 +787,7 @@
         }
         el.value = v;
       } else if (el.type === "color") el.value = /^#[0-9a-f]{6}$/i.test(v) ? v : "#000000";
-      else el.value = v ?? "";
+      else el.value = Array.isArray(v) ? v.join("\n") : v ?? "";
       if (el.type === "range") pct(el);
       const out = el.parentElement.querySelector("output");
       if (out) out.textContent = fmt(el, el.value);
@@ -792,6 +807,7 @@
   function setValue(key, v, delay) {
     if (!settings) return;
     set(settings, key, v);
+    syncDecoder();
     showCli(key);
     renderPreview();
     save(delay);
@@ -836,9 +852,10 @@
         setValue(key, Number(el.value), 150);
       });
     } else if (el.tagName === "TEXTAREA") {
-      const norm = () => el.value.split(/[\n,]/).map(k => k.trim()).filter(Boolean).join("\n");
-      el.addEventListener("input", () => setValue(key, norm(), 600));
-      el.addEventListener("blur", () => setValue(key, norm()));
+      // One entry per line (commas also split); saved as a list.
+      const list = () => [...new Set(el.value.split(/[\n,]/).map(k => k.trim()).filter(Boolean))];
+      el.addEventListener("input", () => setValue(key, list(), 600));
+      el.addEventListener("blur", () => setValue(key, list()));
     } else {
       el.addEventListener(el.type === "color" ? "input" : "change", () => setValue(key, el.value, el.type === "color" ? 150 : 0));
     }

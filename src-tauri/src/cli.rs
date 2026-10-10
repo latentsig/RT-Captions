@@ -46,6 +46,7 @@ KEYS (rt-captions settings shows all)
   audio.engine  nemotron-q4|nemotron-q8|ultra|redux|<model file in the models folder>
   audio.decoder  rnnt|ctc  audio.blank_penalty  0.5  audio.ctc_blank_penalty  0.5   (hybrid models)
   audio.nemotron_blank_penalty  1.0
+  audio.beam  0|8   audio.hotwords  [jaundice, ...]   (hybrid models, CTC decoder)
   audio.mode  low|balanced|performance   audio.language  en|hi (Nemotron)
   audio.source  mic|system|both       audio.rnnoise  true|false
   audio.skip_silence  true|false      audio.speakers  true|false (label voices, system audio)
@@ -444,6 +445,15 @@ fn load_asr(opt: &dyn Fn(&str) -> Option<String>) -> Result<Asr> {
     // --blank-penalty sets the loaded model's own penalty (hybrid or Nemotron).
     let pen = num("--blank-penalty", if asr.hybrid() { s.blank_penalty } else { s.nemotron_blank_penalty })?;
     asr.set_decoding(&opt("--decoder").unwrap_or(s.decoder.clone()), pen, num("--ctc-blank-penalty", s.ctc_blank_penalty)?, pen);
+    // --hotwords a,b,c or @file (one per line).
+    let hot = match opt("--hotwords") {
+        Some(h) => match h.strip_prefix('@') {
+            Some(f) => std::fs::read_to_string(f)?.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect(),
+            None => h.split(',').map(str::trim).filter(|w| !w.is_empty()).map(String::from).collect(),
+        },
+        None => s.hotwords.clone(),
+    };
+    asr.set_hotwords(opt("--beam").map(|b| b.parse()).transpose()?.unwrap_or(s.beam), &hot);
     asr.reset_streams();
     Ok(asr)
 }

@@ -7,6 +7,9 @@ Private by design: audio never leaves your computer. Windows and macOS (Apple Si
 - Captions your microphone, your system audio (calls, videos), or both. With both, your voice is light yellow and everyone else light cyan.
 - A floating, click-through caption overlay that appears only while someone speaks.
 - Pick a speech engine; its model downloads on first use. English or Hindi (Nemotron); Low / Balanced / Performance CPU modes.
+- Your own models: drop a `.gguf` into the models folder and it appears in the engine list.
+  English/Hindi hybrid models get a decoder choice; with CTC, optional beam search and **words to
+  recognise** (names, medical terms such as "jaundice", including near-miss spellings).
 - Everything in the settings window is also a CLI command, so scripts and agents can drive it.
 
 ## Engines
@@ -22,7 +25,8 @@ Measured live on real accented meeting audio (5 min, 3 speakers), Intel i5-12450
 
 Streaming engines process each piece of audio once; rolling-window engines re-transcribe the last
 few seconds on every update (grey preview words, then solid). Silence is never sent to a model.
-Engines run through [parakeet.cpp](https://github.com/mudler/parakeet.cpp) (MIT); models come from their Hugging Face repos.
+Engines run through our fork of [parakeet.cpp](https://github.com/mudler/parakeet.cpp) (MIT),
+[latentsig/parakeet.cpp](https://github.com/latentsig/parakeet.cpp) (branch `rt-captions`); models come from their Hugging Face repos.
 
 ## CLI
 
@@ -30,6 +34,7 @@ Engines run through [parakeet.cpp](https://github.com/mudler/parakeet.cpp) (MIT)
     rt-captions engines                  list engines and which are downloaded
     rt-captions download ultra           fetch a model
     rt-captions set audio.engine redux audio.source both    (a running app applies it live)
+    rt-captions set audio.hotwords '["jaundice", "Nikesh"]'  words to recognise (CTC decoder)
     rt-captions listen --source both     captions in the terminal, no window
     rt-captions transcribe clip.wav      run a recording through the live pipeline
     rt-captions bench clip.wav --ref @reference.txt   accuracy, latency and CPU

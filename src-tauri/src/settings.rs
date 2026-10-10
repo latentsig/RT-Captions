@@ -99,6 +99,7 @@ fn type_name(v: &Value) -> &'static str {
         Value::Bool(_) => "true/false",
         Value::Number(_) => "a number",
         Value::String(_) => "a string",
+        Value::Array(_) => "a list like '[\"jaundice\", \"Nikesh\"]'",
         _ => "an object",
     }
 }
@@ -116,6 +117,9 @@ mod tests {
         assert_eq!(s.audio.source, "system");
         assert!(set(&s, "audio.rnnoise", "\"yes\"").is_err());
         assert!(set(&s, "audio.nope", "1").is_err());
+        let s = set(&s, "audio.hotwords", r#"["jaundice", "Nikesh"]"#).unwrap();
+        assert_eq!(s.audio.hotwords, ["jaundice", "Nikesh"]);
+        assert!(set(&s, "audio.hotwords", "jaundice").is_err());
     }
 
     #[test]

@@ -1,9 +1,11 @@
 //! The speech engine behind the captions (parakeet.cpp); see engines.rs for the catalogue.
 
 use crate::engines::{self, Kind};
+use crate::hotwords::{Decoder, Hotwords, Vocab};
 use crate::parakeet::{self, Parakeet};
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Every model takes 16 kHz mono audio.
 pub const SAMPLE_RATE: usize = 16_000;
@@ -23,6 +25,15 @@ pub struct Asr {
     /// Our English/Hindi models have no language prompt, so English mode locks them to Latin
     /// script by forbidding these tokens (Devanagari pieces and non-ASCII bytes).
     non_latin: Vec<i32>,
+    /// Tokenizer text for host-side decoding (hybrid models).
+    vocab: Option<Arc<Vocab>>,
+    /// Beam search / hotwords over the CTC head (hotwords.rs): width (0 = off) and list.
+    beam: usize,
+    hot: Arc<Hotwords>,
+    ctc: bool,
+    /// One decoder per source while host-side decoding is on.
+    decoders: Vec<Option<Decoder>>,
+    pending: Vec<String>,
 }
 
 impl Asr {
@@ -35,8 +46,13 @@ impl Asr {
         let hybrid = meta.as_ref().is_some_and(|m| m.ctc);
         // Prompt models (Nemotron) take the language directly; promptless ones get a script lock.
         let promptless = meta.as_ref().is_some_and(|m| m.languages.is_empty());
-        let non_latin = if promptless { crate::gguf::non_latin_tokens(&model).unwrap_or_default() } else { Vec::new() };
-        Ok(Self { model: Parakeet::load(&parakeet::find_lib()?, &model, threads)?, kind, hybrid, non_latin })
+        let pieces = if hybrid || promptless { crate::gguf::pieces(&model).unwrap_or_default() } else { Vec::new() };
+        let non_latin = if promptless { crate::gguf::non_latin_tokens(&pieces) } else { Vec::new() };
+        let vocab = (hybrid && !pieces.is_empty()).then(|| Arc::new(Vocab::new(&pieces)));
+        Ok(Self {
+            model: Parakeet::load(&parakeet::find_lib()?, &model, threads)?, kind, hybrid, non_latin, vocab,
+            beam: 0, hot: Arc::new(Hotwords::new(&[])), ctc: false, decoders: Vec::new(), pending: Vec::new(),
+        })
     }
 
     pub fn hybrid(&self) -> bool {
@@ -69,9 +85,45 @@ impl Asr {
         } else {
             ("rnnt", 0.0, 0.0)
         };
+        self.ctc = dec == "ctc";
         if let Err(e) = self.model.set_decoding(dec, rnnt_pen, ctc_pen) {
             eprintln!("{e:#}");
         }
+    }
+
+    /// Beam width (0/1 = greedy) and hotwords for hybrid models decoding with CTC; call before
+    /// `reset_streams`. Either one turns on host-side decoding (hotwords.rs).
+    pub fn set_hotwords(&mut self, beam: usize, words: &[String]) {
+        self.beam = beam;
+        self.hot = Arc::new(Hotwords::new(words));
+    }
+
+    fn host_decoding(&self) -> bool {
+        self.ctc && self.vocab.is_some() && (self.beam > 1 || !self.hot.is_empty())
+    }
+
+    /// Text after the last final word that may still change (host-side decoding only).
+    pub fn pending(&self, source: usize) -> &str {
+        self.pending.get(source).map_or("", String::as_str)
+    }
+
+    /// Runs the host-side decoder on the CTC rows of the last feed/finish.
+    fn decode(&mut self, source: usize, finish: bool) -> (String, Vec<Word>) {
+        while self.decoders.len() <= source {
+            self.decoders.push(None);
+            self.pending.push(String::new());
+        }
+        let (vocab, hot, width) = (self.vocab.clone().expect("host decoding needs a vocab"), self.hot.clone(), self.beam);
+        let d = self.decoders[source].get_or_insert_with(|| Decoder::new(vocab, hot, width));
+        let (rows, classes) = &self.model.ctc;
+        let (mut words, pending) = if *classes > 0 { d.feed(rows, *classes) } else { (Vec::new(), String::new()) };
+        self.pending[source] = pending;
+        if finish {
+            words.extend(d.finish());
+            self.pending[source].clear();
+        }
+        let text = words.iter().map(|w| format!(" {}", w.word)).collect();
+        (text, words)
     }
 
     /// Rolling engines: transcribe a whole window.
@@ -84,7 +136,8 @@ impl Asr {
         if self.kind != Kind::Streaming {
             bail!("this engine does not stream");
         }
-        self.model.stream_feed(source, pcm)
+        let out = self.model.stream_feed(source, pcm)?;
+        Ok(if self.host_decoding() { self.decode(source, false) } else { out })
     }
 
     /// Streaming engines: flush and close one source's session at the end of an utterance.
@@ -92,10 +145,13 @@ impl Asr {
         if self.kind != Kind::Streaming {
             return Ok(Default::default());
         }
-        self.model.stream_finish(source)
+        let out = self.model.stream_finish(source)?;
+        Ok(if self.host_decoding() { self.decode(source, true) } else { out })
     }
 
     pub fn reset_streams(&mut self) {
         self.model.reset_streams();
+        self.decoders.clear();
+        self.pending.clear();
     }
 }

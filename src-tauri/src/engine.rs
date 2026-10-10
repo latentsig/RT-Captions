@@ -31,6 +31,11 @@ pub struct AudioSettings {
     pub ctc_blank_penalty: f64,
     /// Nemotron (1.0: WER 16.7 -> 12.0% / 22.8 -> 21.5% on two meeting clips vs 0).
     pub nemotron_blank_penalty: f64,
+    /// Hybrid models with the CTC decoder: beam search width (0 = greedy) and words to recognise
+    /// (names, medical terms). Either one decodes in hotwords.rs; final text then lags ~0.3 s
+    /// behind a grey preview of the last word or two.
+    pub beam: usize,
+    pub hotwords: Vec<String>,
     pub rnnoise: bool,
     /// Streaming engines: feed only what the loudness detector calls speech. Off (default): feed
     /// everything and let the model decide; with the model on the GPU this costs little and
@@ -45,7 +50,7 @@ pub struct AudioSettings {
 
 impl Default for AudioSettings {
     fn default() -> Self {
-        Self { source: "both".into(), engine: engines::DEFAULT.into(), threads: 0, mode: "balanced".into(), language: "en".into(), decoder: "rnnt".into(), blank_penalty: 0.5, ctc_blank_penalty: 0.5, nemotron_blank_penalty: 1.0, rnnoise: false, skip_silence: false, speakers: true, speaker_threshold: 0.6, stream: StreamConfig::default() }
+        Self { source: "both".into(), engine: engines::DEFAULT.into(), threads: 0, mode: "balanced".into(), language: "en".into(), decoder: "rnnt".into(), blank_penalty: 0.5, ctc_blank_penalty: 0.5, nemotron_blank_penalty: 1.0, beam: 0, hotwords: Vec::new(), rnnoise: false, skip_silence: false, speakers: true, speaker_threshold: 0.6, stream: StreamConfig::default() }
     }
 }
 
@@ -293,6 +298,8 @@ struct Input {
     last_audio: Instant,
     /// Ungated streaming: when the model last produced text (None = nothing since the last flush).
     heard: Option<Instant>,
+    /// Host-side decoding: the pending text last sent (to notice when it changes).
+    pending: String,
     /// RT_CAPTIONS_DEBUG: per-second input level and speech/mute counts on stderr.
     probe: Probe,
 }
@@ -368,6 +375,7 @@ const BATCH: usize = if cfg!(target_os = "macos") { 320 } else { 1_600 };
 fn session(asr: &mut Asr, s: &AudioSettings, rx: &Receiver<Msg>, emit: &impl Fn(Event)) -> Option<AudioSettings> {
     asr.set_language(&s.language);
     asr.set_decoding(&s.decoder, s.blank_penalty, s.ctc_blank_penalty, s.nemotron_blank_penalty);
+    asr.set_hotwords(s.beam, &s.hotwords);
     asr.reset_streams();
     let streaming = asr.kind() == Kind::Streaming;
     // Never update faster than the engine can keep up with (a slow pass would build a backlog).
@@ -400,6 +408,7 @@ fn session(asr: &mut Asr, s: &AudioSettings, rx: &Receiver<Msg>, emit: &impl Fn(
                 queued: Vec::new(),
                 last_audio: Instant::now(),
                 heard: None,
+                pending: String::new(),
                 probe: Probe::default(),
             }),
             // ponytail: if system capture fails (e.g. no permission), "both"
@@ -541,7 +550,11 @@ fn session(asr: &mut Asr, s: &AudioSettings, rx: &Receiver<Msg>, emit: &impl Fn(
                 if ended {
                     input.fed = 0; // the next session's word times start from zero
                 }
-                (!text.is_empty() || ended).then(|| (text, String::new(), ended, delay))
+                // Host-side decoding (beam / hotwords) shows its undecided last word or two as pending.
+                let pending = asr.pending(i).to_string();
+                let changed = pending != input.pending;
+                input.pending.clone_from(&pending);
+                (!text.is_empty() || ended || changed).then(|| (text, pending, ended, delay))
             } else {
                 if muted {
                     input.cap.discard();

@@ -153,10 +153,8 @@ pub fn read(path: &Path) -> Result<Meta> {
     })
 }
 
-/// Ids of tokens that write non-Latin script: Devanagari pieces, plus the byte-fallback tokens
-/// for non-ASCII bytes (otherwise Devanagari could still be spelled byte by byte). Suppressing
-/// these locks an English/Hindi model to English (Latin) output.
-pub fn non_latin_tokens(path: &Path) -> Result<Vec<i32>> {
+/// The tokenizer's pieces (SentencePiece, "▁" = word start); empty if the file has none.
+pub fn pieces(path: &Path) -> Result<Vec<String>> {
     let mut r = BufReader::new(std::fs::File::open(path)?);
     if &rd::<4>(&mut r)? != b"GGUF" {
         bail!("not a GGUF file");
@@ -169,14 +167,21 @@ pub fn non_latin_tokens(path: &Path) -> Result<Vec<i32>> {
         let v = value(&mut r, t)?;
         if key == "parakeet.tokenizer.pieces" {
             let Val::Strs(pieces) = v else { bail!("tokenizer pieces are not strings") };
-            let byte = |p: &str| p.strip_prefix("<0x").and_then(|h| h.strip_suffix('>')).and_then(|h| u8::from_str_radix(h, 16).ok());
-            return Ok(pieces.iter().enumerate()
-                .filter(|(_, p)| p.chars().any(|c| ('\u{0900}'..='\u{097F}').contains(&c)) || byte(p).is_some_and(|b| b >= 0x80))
-                .map(|(i, _)| i as i32)
-                .collect());
+            return Ok(pieces);
         }
     }
     Ok(Vec::new())
+}
+
+/// Ids of tokens that write non-Latin script: Devanagari pieces, plus the byte-fallback tokens
+/// for non-ASCII bytes (otherwise Devanagari could still be spelled byte by byte). Suppressing
+/// these locks an English/Hindi model to English (Latin) output.
+pub fn non_latin_tokens(pieces: &[String]) -> Vec<i32> {
+    let byte = |p: &str| p.strip_prefix("<0x").and_then(|h| h.strip_suffix('>')).and_then(|h| u8::from_str_radix(h, 16).ok());
+    pieces.iter().enumerate()
+        .filter(|(_, p)| p.chars().any(|c| ('\u{0900}'..='\u{097F}').contains(&c)) || byte(p).is_some_and(|b| b >= 0x80))
+        .map(|(i, _)| i as i32)
+        .collect()
 }
 
 /// "q8_0" from a file name like "my-model-q8_0.gguf", when the tensors don't say.

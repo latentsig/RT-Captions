@@ -59,6 +59,10 @@ pub struct Parakeet {
     set_decode_options: Option<unsafe extern "C" fn(*const c_char, f32, f32)>,
     /// parakeet_capi_set_suppressed_tokens (our fork's patch).
     set_suppressed: Option<unsafe extern "C" fn(*const c_int, c_int)>,
+    /// parakeet_capi_stream_ctc_rows (our fork's patch).
+    stream_ctc_rows: Option<unsafe extern "C" fn(*mut c_void, *mut c_int, *mut c_int) -> *const f32>,
+    /// CTC scores of the last feed/finish ([frames x classes]), for hotwords.rs.
+    pub ctc: (Vec<f32>, usize),
 }
 
 // The context is only ever used from the engine thread that owns it.
@@ -116,6 +120,8 @@ impl Parakeet {
                 streams: Vec::new(),
                 set_decode_options: lib.get::<unsafe extern "C" fn(*const c_char, f32, f32)>(b"parakeet_capi_set_decode_options\0").ok().map(|f| *f),
                 set_suppressed: lib.get::<unsafe extern "C" fn(*const c_int, c_int)>(b"parakeet_capi_set_suppressed_tokens\0").ok().map(|f| *f),
+                stream_ctc_rows: lib.get::<unsafe extern "C" fn(*mut c_void, *mut c_int, *mut c_int) -> *const f32>(b"parakeet_capi_stream_ctc_rows\0").ok().map(|f| *f),
+                ctc: (Vec::new(), 0),
                 lang: c"en".to_owned(),
                 ctx,
                 _lib: lib,
@@ -170,7 +176,21 @@ impl Parakeet {
             self.streams[source] = s;
         }
         let p = unsafe { (self.stream_feed)(self.streams[source], pcm.as_ptr(), pcm.len() as c_int) };
+        self.keep_ctc(self.streams[source]);
         self.stream_out(p)
+    }
+
+    /// Copies the stream's CTC rows from its last feed/finalize (empty unless decoding with CTC).
+    fn keep_ctc(&mut self, st: *mut c_void) {
+        self.ctc.0.clear();
+        self.ctc.1 = 0;
+        let Some(f) = self.stream_ctc_rows else { return };
+        let (mut frames, mut classes) = (0, 0);
+        let p = unsafe { f(st, &mut frames, &mut classes) };
+        if !p.is_null() && frames > 0 && classes > 0 {
+            self.ctc.0.extend_from_slice(unsafe { std::slice::from_raw_parts(p, (frames * classes) as usize) });
+            self.ctc.1 = classes as usize;
+        }
     }
 
     /// End of an utterance: flush the audio the model is still holding (so the last word shows
@@ -178,6 +198,7 @@ impl Parakeet {
     pub fn stream_finish(&mut self, source: usize) -> Result<(String, Vec<Word>)> {
         let Some(&st) = self.streams.get(source).filter(|s| !s.is_null()) else { return Ok(Default::default()) };
         let p = unsafe { (self.stream_finalize)(st) };
+        self.keep_ctc(st);
         let out = self.stream_out(p);
         unsafe { (self.stream_free)(st) };
         self.streams[source] = std::ptr::null_mut();
