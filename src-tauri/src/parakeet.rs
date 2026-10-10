@@ -73,7 +73,7 @@ impl Parakeet {
     pub fn load(lib_path: &Path, model_path: &Path, threads: usize) -> Result<Self> {
         // Windows: CPU (measured). macOS: let the library pick Metal on Apple Silicon.
         if !cfg!(target_os = "macos") {
-            std::env::set_var("PARAKEET_DEVICE", "cpu");
+            engine_env("PARAKEET_DEVICE", "cpu");
         }
         unsafe {
             let mut live_contexts = LIVE_CONTEXTS.lock().unwrap_or_else(|e| e.into_inner());
@@ -276,7 +276,7 @@ struct Ctx {
 impl Ctx {
     fn load(model_path: &Path) -> Result<Self> {
         if !cfg!(target_os = "macos") {
-            std::env::set_var("PARAKEET_DEVICE", "cpu");
+            engine_env("PARAKEET_DEVICE", "cpu");
         }
         unsafe {
             let mut live = LIVE_CONTEXTS.lock().unwrap_or_else(|e| e.into_inner());
@@ -481,9 +481,33 @@ impl Drop for Parakeet {
     }
 }
 
+/// Sets a variable the engine library reads at startup. On Windows it also goes through the C
+/// runtime: libparakeet and libomp read the CRT's copy of the environment, which
+/// `std::env::set_var` (SetEnvironmentVariableW) alone does not update.
+fn engine_env(key: &str, value: &str) {
+    std::env::set_var(key, value);
+    #[cfg(windows)]
+    {
+        extern "C" {
+            fn _putenv_s(name: *const c_char, value: *const c_char) -> c_int;
+        }
+        if let (Ok(k), Ok(v)) = (CString::new(key), CString::new(value)) {
+            unsafe { _putenv_s(k.as_ptr(), v.as_ptr()) };
+        }
+    }
+}
+
 /// libparakeet needs libc++/libomp/libunwind from its own folder; on Windows a plain
 /// LoadLibrary only searches the exe's folder for those, so ask for the DLL's folder too.
 fn load_library(path: &Path) -> Result<Library> {
+    // OpenMP's idle workers spin 200 ms after every parallel region by default. Captions run a
+    // short graph every 80-560 ms, so they never slept: at real-time pace Nemotron q4 used 3.1
+    // cores and run5 2.2. Spinning 5 ms covers the back-to-back graphs of one chunk and sleeps
+    // between chunks: 1.3 / 0.45 cores, with chunks no slower (0, 1, 5, 20 ms measured).
+    // An explicit KMP_BLOCKTIME in the environment still wins.
+    if std::env::var_os("KMP_BLOCKTIME").is_none() {
+        engine_env("KMP_BLOCKTIME", "5"); // milliseconds
+    }
     #[cfg(windows)]
     let lib = unsafe {
         use libloading::os::windows::{Library as WinLib, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR};

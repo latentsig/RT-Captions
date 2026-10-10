@@ -22,7 +22,7 @@ USAGE
   rt-captions reset                    restore default settings
   rt-captions listen [--source mic|system|both] [--seconds N] [--json]
                                        caption live audio to stdout, no window
-  rt-captions transcribe <file.wav> [--json] [--window S] [--hop S] [--no-rnnoise] [--speakers]
+  rt-captions transcribe <file.wav> [--json] [--window S] [--hop S] [--no-rnnoise] [--speakers] [--realtime]
   rt-captions diarize <file.wav> [--rttm-out F] [--realtime] [--live-labels]   speaker labels as RTTM (no captions)
                                        run a recording through the live pipeline
   rt-captions people                   list saved people (voice signatures) and how many each has
@@ -32,7 +32,7 @@ USAGE
   rt-captions voices discard <id>      forget one
   rt-captions enroll <name> <file.wav> save the voice of a one-speaker recording under a name
   rt-captions compare <a.wav> <b.wav>... print the voice cosine of every pair of recordings
-  rt-captions bench <file.wav> --ref <text|@file.txt> [--window 3,4,5] [--hop S] [--rnnoise|--no-rnnoise]
+  rt-captions bench <file.wav> --ref <text|@file.txt> [--window 3,4,5] [--hop S] [--rnnoise|--no-rnnoise] [--realtime]
                                        accuracy (WER), latency and CPU per setting
   rt-captions engines                  list speech engines and which are downloaded
   rt-captions download <engine>        download an engine's model (e.g. ultra), or `diarization` / `speakers` for speaker labels
@@ -99,7 +99,7 @@ pub fn run(args: Vec<String>) -> Result<()> {
                 return transcribe_speakers(&mut asr, path, rnnoise);
             }
             let block = opt("--block").map(|b| b.parse()).transpose()?.unwrap_or(1600);
-            let run = run_file(&mut asr, path, &cfg, rnnoise, block)?;
+            let run = run_file(&mut asr, path, &cfg, rnnoise, block, flag("--realtime"))?;
             if flag("--json") {
                 println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "text": run.text(), "words": run.words, "lag_s": run.commit_lag }))?);
             } else {
@@ -475,7 +475,9 @@ fn read_wav_16k(path: &str, rnnoise: bool) -> Result<Vec<f32>> {
 }
 
 /// `block`: samples per streaming feed (the app batches 1600 = 100 ms).
-pub fn run_file(asr: &mut Asr, path: &str, cfg: &StreamConfig, rnnoise: bool, block: usize) -> Result<FileRun> {
+/// `realtime`: feed streaming audio at its real pace (sleeping in between, like the live app), so
+/// the process's CPU time measures what captions cost a battery; otherwise as fast as possible.
+pub fn run_file(asr: &mut Asr, path: &str, cfg: &StreamConfig, rnnoise: bool, block: usize, realtime: bool) -> Result<FileRun> {
     let audio = read_wav_16k(path, rnnoise)?;
     let duration_s = audio.len() as f64 / SAMPLE_RATE as f64;
 
@@ -485,8 +487,16 @@ pub fn run_file(asr: &mut Asr, path: &str, cfg: &StreamConfig, rnnoise: bool, bl
         asr.reset_streams();
         let mut clock = 0.0f64;
         let pieces = audio.chunks(block).count();
+        let start = Instant::now();
         for (k, piece) in audio.chunks(block).chain(std::iter::once(&[0.0f32; 19_200][..])).enumerate() {
-            clock = clock.max(((k + 1) * block).min(audio.len() + 19_200) as f64 / SAMPLE_RATE as f64);
+            let arrival = ((k + 1) * block).min(audio.len() + 19_200) as f64 / SAMPLE_RATE as f64;
+            if realtime {
+                let due = Duration::from_secs_f64(arrival);
+                if let Some(wait) = due.checked_sub(start.elapsed()) {
+                    std::thread::sleep(wait);
+                }
+            }
+            clock = clock.max(arrival);
             let t = Instant::now();
             let (_, mut words) = asr.stream_feed(0, piece)?;
             if k == pieces {
@@ -592,7 +602,7 @@ fn bench(args: &[String], opt: &dyn Fn(&str) -> Option<String>) -> Result<()> {
         let mut cfg = base.clone();
         apply_stream_flags(&mut cfg, &Some(w), &opt("--hop"))?;
         let block = opt("--block").map(|b| b.parse()).transpose()?.unwrap_or(1600);
-        let run = run_file(&mut asr, path, &cfg, rnnoise, block)?;
+        let run = run_file(&mut asr, path, &cfg, rnnoise, block, args.iter().any(|a| a == "--realtime"))?;
         let wer = reference.as_ref().map_or("-".into(), |r| format!("{:.1}%", 100.0 * wer(r, &norm_words(&run.text()))));
         let busy = 100.0 * run.busy_s / run.duration_s;
         if streaming {
