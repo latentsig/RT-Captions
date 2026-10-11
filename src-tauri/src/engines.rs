@@ -136,6 +136,8 @@ pub struct Model {
     pub known: bool,
     pub quant: Option<String>,
     pub lookahead_ms: Option<u32>,
+    /// Look-aheads (ms) a multi-lookahead model can run at (audio.lookahead_ms picks one).
+    pub lookaheads_ms: Vec<u32>,
     pub languages: Vec<String>,
     /// Has a CTC head (hybrid model): decoded with CTC unless audio.decoder = "rnnt".
     pub ctc: bool,
@@ -149,7 +151,12 @@ impl Model {
         if let Some(q) = &self.quant {
             parts.push(q.clone());
         }
+        let ctc = if self.ctc { " CTC" } else { "" };
         parts.push(match (self.kind, self.lookahead_ms) {
+            (Kind::Streaming, _) if self.lookaheads_ms.len() > 1 => {
+                let ms: Vec<String> = self.lookaheads_ms.iter().map(u32::to_string).collect();
+                format!("streaming{ctc}, {} ms look-ahead", ms.join("/"))
+            }
             (Kind::Streaming, Some(ms)) => format!("streaming{}, {ms} ms look-ahead", if self.ctc { " CTC" } else { "" }),
             (Kind::Streaming, None) => format!("streaming{}", if self.ctc { " CTC" } else { "" }),
             (Kind::Rolling, _) => "rolling window".into(),
@@ -169,6 +176,7 @@ fn describe(m: &mut Model, path: &std::path::Path) {
     if let Ok(meta) = crate::gguf::read(path) {
         m.quant = meta.quant.filter(|q| !q.starts_with("type "));
         m.lookahead_ms = meta.lookahead_ms;
+        m.lookaheads_ms = meta.lookaheads_ms;
         m.languages = meta.languages;
         m.ctc = meta.ctc;
     }
@@ -181,7 +189,7 @@ fn describe(m: &mut Model, path: &std::path::Path) {
 /// models folder (dropped in by hand, or a custom build).
 pub fn list() -> Vec<Model> {
     let blank = |id: String, name: String, blurb: String, kind: Kind, file: String, bytes: u64, installed: bool, known: bool| Model {
-        id, name, blurb, kind, file, bytes, installed, known, quant: None, lookahead_ms: None, languages: Vec::new(), ctc: false, specs: String::new(),
+        id, name, blurb, kind, file, bytes, installed, known, quant: None, lookahead_ms: None, lookaheads_ms: Vec::new(), languages: Vec::new(), ctc: false, specs: String::new(),
     };
     let mut out: Vec<Model> = ENGINES.iter().map(|e| {
         let path = installed(e);

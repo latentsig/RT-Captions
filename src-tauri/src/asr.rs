@@ -34,6 +34,9 @@ pub struct Asr {
     /// One decoder per source while host-side decoding is on.
     decoders: Vec<Option<Decoder>>,
     pending: Vec<String>,
+    /// Look-aheads (ms) the streaming model was trained for, and its encoder frame (ms).
+    lookaheads: Vec<u32>,
+    frame_ms: u32,
 }
 
 impl Asr {
@@ -49,9 +52,11 @@ impl Asr {
         let pieces = if hybrid || promptless { crate::gguf::pieces(&model).unwrap_or_default() } else { Vec::new() };
         let non_latin = if promptless { crate::gguf::non_latin_tokens(&pieces) } else { Vec::new() };
         let vocab = (hybrid && !pieces.is_empty()).then(|| Arc::new(Vocab::new(&pieces)));
+        let (lookaheads, frame_ms) = meta.as_ref().map_or((Vec::new(), 80), |m| (m.lookaheads_ms.clone(), m.frame_ms.max(1)));
         Ok(Self {
             model: Parakeet::load(&parakeet::find_lib()?, &model, threads)?, kind, hybrid, non_latin, vocab,
             beam: 0, hot: Arc::new(Hotwords::new(&[])), ctc: false, decoders: Vec::new(), pending: Vec::new(),
+            lookaheads, frame_ms,
         })
     }
 
@@ -89,6 +94,14 @@ impl Asr {
         if let Err(e) = self.model.set_decoding(dec, rnnt_pen, ctc_pen) {
             eprintln!("{e:#}");
         }
+    }
+
+    /// Streaming look-ahead: `ms` when the model was trained for it, else the model's own; call
+    /// before `reset_streams`. Returns the look-ahead used when it is not the model's own.
+    pub fn set_lookahead(&mut self, ms: u32) -> Option<u32> {
+        let ok = self.lookaheads.contains(&ms);
+        self.model.set_lookahead(if ok { (ms / self.frame_ms) as i32 } else { -1 });
+        ok.then_some(ms)
     }
 
     /// Beam width (0/1 = greedy) and hotwords for hybrid models decoding with CTC; call before

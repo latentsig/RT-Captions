@@ -248,6 +248,7 @@
     body:not(.has-ctc) .ctc-only { display: none; }
     body.has-ctc .nemo-only, body:not(.streaming) .nemo-only { display: none; }
     body:not(.dec-ctc) .ctcdec-only { display: none; }
+    body:not(.multi-la) .la-only { display: none; }
 
     /* appearance preview: the real overlay's CSS, scoped */
     .stage { position: sticky; top: -1px; z-index: 3; border-radius: 14px; padding: 26px 18px 18px; background: #55627d; box-shadow: 0 0 0 1px var(--hair), 0 8px 22px rgba(0, 0, 0, .12); overflow: hidden; }
@@ -435,6 +436,16 @@
         <div class="row nemo-only">
           <label class="lbl" for="nemopen"><span class="label">Blank penalty</span><span class="hint">Raise if words go missing; too high adds stray words</span></label>
           <div class="ctl"><input type="range" id="nemopen" data-key="audio.nemotron_blank_penalty" min="0" max="2" step="0.1" data-fmt="raw"><output for="nemopen"></output></div>
+        </div>
+        <div class="row la-only">
+          <div><span class="label" id="l-la">Look-ahead</span><span class="hint">How long each word waits for the audio after it: lower shows captions sooner, higher is a little more accurate</span></div>
+          <div class="seg" id="la-seg" role="radiogroup" aria-labelledby="l-la" data-key="audio.lookahead_ms" data-num>
+            <button type="button" role="radio" data-value="0">0 ms</button>
+            <button type="button" role="radio" data-value="80">80</button>
+            <button type="button" role="radio" data-value="240">240</button>
+            <button type="button" role="radio" data-value="480">480</button>
+            <button type="button" role="radio" data-value="1040">1040</button>
+          </div>
         </div>
         <div class="row">
           <div><span class="label" id="l-lang">Language</span><span class="hint">English keeps captions in English letters; Hindi allows Hindi script and Hinglish</span></div>
@@ -823,13 +834,14 @@
       for (const x of buttons) { x.setAttribute("aria-checked", x === b); x.tabIndex = x === b ? 0 : -1; }
       onPick(b);
     };
-    buttons.forEach((b, i) => {
+    buttons.forEach(b => {
       b.addEventListener("click", () => pick(b));
       b.addEventListener("keydown", e => {
         const d = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
         if (!d) return;
         e.preventDefault();
-        const n = buttons[(i + d + buttons.length) % buttons.length];
+        const vis = buttons.filter(x => !x.hidden);
+        const n = vis[(vis.indexOf(b) + d + vis.length) % vis.length];
         n.focus();
         pick(n);
       });
@@ -907,6 +919,10 @@
     const sel = engines.find(e => e.id === cur) || {};
     document.body.classList.toggle("streaming", sel.kind === "streaming");
     document.body.classList.toggle("has-ctc", Boolean(sel.ctc));
+    // look-ahead: only the values this model was trained for
+    const la = sel.kind === "streaming" ? sel.lookaheads_ms || [] : [];
+    document.body.classList.toggle("multi-la", la.length > 1);
+    for (const b of $("la-seg").querySelectorAll("button")) b.hidden = !la.includes(Number(b.dataset.value));
   }
   function pickEngine(e) {
     if (!e.installed && !(progress[e.id] && !progress[e.id].finished)) {

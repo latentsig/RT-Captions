@@ -59,6 +59,8 @@ pub struct Parakeet {
     set_decode_options: Option<unsafe extern "C" fn(*const c_char, f32, f32)>,
     /// parakeet_capi_set_suppressed_tokens (our fork's patch).
     set_suppressed: Option<unsafe extern "C" fn(*const c_int, c_int)>,
+    /// parakeet_capi_set_stream_lookahead (our fork's patch).
+    set_lookahead: Option<unsafe extern "C" fn(c_int)>,
     /// parakeet_capi_stream_ctc_rows (our fork's patch).
     stream_ctc_rows: Option<unsafe extern "C" fn(*mut c_void, *mut c_int, *mut c_int) -> *const f32>,
     /// CTC scores of the last feed/finish ([frames x classes]), for hotwords.rs.
@@ -120,6 +122,7 @@ impl Parakeet {
                 streams: Vec::new(),
                 set_decode_options: lib.get::<unsafe extern "C" fn(*const c_char, f32, f32)>(b"parakeet_capi_set_decode_options\0").ok().map(|f| *f),
                 set_suppressed: lib.get::<unsafe extern "C" fn(*const c_int, c_int)>(b"parakeet_capi_set_suppressed_tokens\0").ok().map(|f| *f),
+                set_lookahead: lib.get::<unsafe extern "C" fn(c_int)>(b"parakeet_capi_set_stream_lookahead\0").ok().map(|f| *f),
                 stream_ctc_rows: lib.get::<unsafe extern "C" fn(*mut c_void, *mut c_int, *mut c_int) -> *const f32>(b"parakeet_capi_stream_ctc_rows\0").ok().map(|f| *f),
                 ctc: (Vec::new(), 0),
                 lang: c"en".to_owned(),
@@ -231,6 +234,14 @@ impl Parakeet {
     pub fn set_suppressed(&mut self, ids: &[i32]) {
         if let Some(f) = self.set_suppressed {
             unsafe { f(ids.as_ptr(), ids.len() as c_int) };
+        }
+    }
+
+    /// Streaming look-ahead in encoder frames for streams begun afterwards (process-wide), -1 =
+    /// the model's own. Only for multi-lookahead models, at a value they were trained on. Needs our fork.
+    pub fn set_lookahead(&mut self, frames: i32) {
+        if let Some(f) = self.set_lookahead {
+            unsafe { f(frames) };
         }
     }
 

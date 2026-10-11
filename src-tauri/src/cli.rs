@@ -47,6 +47,7 @@ KEYS (rt-captions settings shows all)
   audio.decoder  rnnt|ctc  audio.blank_penalty  0.5  audio.ctc_blank_penalty  0.5   (hybrid models)
   audio.nemotron_blank_penalty  1.0
   audio.beam  0|8   audio.hotwords  [jaundice, ...]   (hybrid models, CTC decoder)
+  audio.lookahead_ms  0|80|240|480|1040  (streaming models trained on several; others keep their own)
   audio.mode  low|balanced|performance   audio.language  en|hi (Nemotron)
   audio.source  mic|system|both       audio.rnnoise  true|false
   audio.skip_silence  true|false      audio.speakers  true|false (label voices, system audio)
@@ -454,6 +455,10 @@ fn load_asr(opt: &dyn Fn(&str) -> Option<String>) -> Result<Asr> {
         None => s.hotwords.clone(),
     };
     asr.set_hotwords(opt("--beam").map(|b| b.parse()).transpose()?.unwrap_or(s.beam), &hot);
+    // --lookahead MS, else the setting; PARAKEET_LOOKAHEAD_FRAMES (frames) still wins when set
+    if std::env::var_os("PARAKEET_LOOKAHEAD_FRAMES").is_none() {
+        asr.set_lookahead(opt("--lookahead").map(|v| v.parse()).transpose()?.unwrap_or(s.lookahead_ms));
+    }
     asr.reset_streams();
     Ok(asr)
 }

@@ -11,6 +11,8 @@ enum Val {
     Int(i64),
     Str(String),
     Strs(Vec<String>),
+    /// Short integer arrays (e.g. look-ahead presets); long ones are skipped as Other.
+    Ints(Vec<i64>),
     Other,
 }
 
@@ -24,6 +26,11 @@ pub struct Meta {
     pub streaming: bool,
     /// Future audio a streaming model waits for, in ms.
     pub lookahead_ms: Option<u32>,
+    /// Look-aheads (ms) a multi-lookahead streaming model was trained for, smallest first; empty
+    /// when the file lists none (the model then only runs at `lookahead_ms`).
+    pub lookaheads_ms: Vec<u32>,
+    /// Encoder frame length in ms (80 for FastConformer).
+    pub frame_ms: u32,
     /// Dominant weight type, e.g. "q8_0", "q4_k", "f16", "ternary".
     pub quant: Option<String>,
     /// Languages the model can be prompted with (multilingual prompt models only).
@@ -63,10 +70,15 @@ fn value(r: &mut impl Read, t: u32) -> Result<Val> {
             if et == 8 {
                 Val::Strs((0..n).map(|_| string(r)).collect::<Result<_>>()?)
             } else {
+                let mut ints = Vec::new();
                 for _ in 0..n {
-                    value(r, et)?;
+                    if let Val::Int(v) = value(r, et)? {
+                        if n <= 64 {
+                            ints.push(v);
+                        }
+                    }
                 }
-                Val::Other
+                if ints.is_empty() { Val::Other } else { Val::Ints(ints) }
             }
         }
         10 | 11 => Val::Int(u64_(r)? as i64),
@@ -147,6 +159,17 @@ pub fn read(path: &Path) -> Result<Meta> {
         ctc: head.ends_with("_ctc"),
         streaming,
         lookahead_ms: streaming.then(|| int("parakeet.encoder.att_context_right")).flatten().map(|r| (r * frame_ms) as u32),
+        lookaheads_ms: match kv.get("parakeet.encoder.att_context_presets") {
+            // [left, right] pairs
+            Some(Val::Ints(v)) if streaming => {
+                let mut ms: Vec<u32> = v.chunks(2).filter(|p| p.len() == 2).map(|p| (p[1] * frame_ms) as u32).collect();
+                ms.sort_unstable();
+                ms.dedup();
+                ms
+            }
+            _ => Vec::new(),
+        },
+        frame_ms: frame_ms as u32,
         // Moondream's packed ternary weights are stored as i8 tensors plus this marker.
         quant: if has_prefix("parakeet.ternary.") { Some("ternary".into()) } else { quant },
         languages,
@@ -199,15 +222,18 @@ mod tests {
 
     #[test]
     fn reads_a_minimal_gguf() {
-        // header: magic, v3, 1 tensor, 3 kv
+        // header: magic, v3, 1 tensor, 4 kv
         let mut b = b"GGUF".to_vec();
         b.extend(3u32.to_le_bytes());
         b.extend(1u64.to_le_bytes());
-        b.extend(3u64.to_le_bytes());
+        b.extend(4u64.to_le_bytes());
         let s = |b: &mut Vec<u8>, v: &str| { b.extend((v.len() as u64).to_le_bytes()); b.extend(v.as_bytes()); };
         s(&mut b, "general.architecture"); b.extend(8u32.to_le_bytes()); s(&mut b, "parakeet");
         s(&mut b, "parakeet.streaming.valid_out_len"); b.extend(5u32.to_le_bytes()); b.extend(4i32.to_le_bytes());
         s(&mut b, "parakeet.encoder.att_context_right"); b.extend(5u32.to_le_bytes()); b.extend(6i32.to_le_bytes());
+        // presets [[70,6],[70,1],[70,0],[70,6]]: an i32 array of 8
+        s(&mut b, "parakeet.encoder.att_context_presets"); b.extend(9u32.to_le_bytes()); b.extend(5u32.to_le_bytes()); b.extend(8u64.to_le_bytes());
+        for v in [70, 6, 70, 1, 70, 0, 70, 6] { b.extend((v as i32).to_le_bytes()); }
         // tensor: name, 2 dims (512 x 512), type q8_0, offset 0
         s(&mut b, "enc.w"); b.extend(2u32.to_le_bytes()); b.extend(512u64.to_le_bytes()); b.extend(512u64.to_le_bytes());
         b.extend(8u32.to_le_bytes()); b.extend(0u64.to_le_bytes());
@@ -216,6 +242,8 @@ mod tests {
         let m = read(&p).unwrap();
         assert!(m.is_asr && m.streaming);
         assert_eq!(m.lookahead_ms, Some(480));
+        assert_eq!(m.lookaheads_ms, vec![0, 80, 480]);
+        assert_eq!(m.frame_ms, 80);
         assert_eq!(m.quant.as_deref(), Some("q8_0"));
         assert_eq!(quant_from_name("my-asr-la6-q8_0.gguf").as_deref(), Some("q8_0"));
     }
