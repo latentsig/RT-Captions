@@ -9,7 +9,7 @@ use crate::engines;
 use crate::parakeet::{Diarizer, Encoder, Segment};
 use crate::people::{self, cosine, now_secs, now_u64, PeopleDb, Who};
 use crate::asr::SAMPLE_RATE;
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde::Serialize;
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
@@ -503,8 +503,85 @@ struct FrameRec {
     live: String,
 }
 
+/// What the diarizer said after one feed.
+#[derive(Clone, Default)]
+struct DiarStep {
+    time: f64,
+    done: Vec<Segment>,
+    open: Vec<Segment>,
+}
+
+/// The diarizer, or (evaluation, `RT_CAPTIONS_DIAR_TAPE=record:<file>|replay:<file>`) a recording of its
+/// answers per feed, so the labelling logic can be re-run on a file without the diarizer's cost. The
+/// diarizer is deterministic, so a replay over the same audio and feed sizes gives the same answers.
+enum Diar {
+    Live(Diarizer, Option<(std::path::PathBuf, Vec<DiarStep>)>),
+    Replay(std::vec::IntoIter<DiarStep>, DiarStep),
+}
+
+fn segs_text(segs: &[Segment]) -> String {
+    segs.iter().map(|s| format!("{},{},{}", s.speaker, s.start, s.end)).collect::<Vec<_>>().join(" ")
+}
+
+fn parse_segs(t: &str) -> Result<Vec<Segment>> {
+    t.split_whitespace().map(|s| {
+        let v: Vec<&str> = s.split(',').collect();
+        anyhow::ensure!(v.len() == 3, "bad segment '{s}'");
+        Ok(Segment { speaker: v[0].parse()?, start: v[1].parse()?, end: v[2].parse()? })
+    }).collect()
+}
+
+impl Diar {
+    /// Tape format: one line per feed, `time|done segments|open segments`, a segment as `speaker,start,end`.
+    fn replay(path: &str) -> Result<Self> {
+        let text = std::fs::read_to_string(path).with_context(|| format!("diarizer tape {path}"))?;
+        let steps = text.lines().map(|l| {
+            let mut f = l.split('|');
+            let (t, d, o) = (f.next().unwrap_or(""), f.next().unwrap_or(""), f.next().unwrap_or(""));
+            Ok(DiarStep { time: t.parse()?, done: parse_segs(d)?, open: parse_segs(o)? })
+        }).collect::<Result<Vec<_>>>()?;
+        Ok(Diar::Replay(steps.into_iter(), DiarStep::default()))
+    }
+
+    fn feed(&mut self, pcm: &[f32]) -> Result<Vec<Segment>> {
+        match self {
+            Diar::Live(d, tape) => {
+                let done = d.feed(pcm)?;
+                if let Some((_, steps)) = tape {
+                    steps.push(DiarStep { time: d.time(), done: done.clone(), open: d.active() });
+                }
+                Ok(done)
+            }
+            Diar::Replay(steps, cur) => {
+                *cur = steps.next().context("diarizer tape ended before the audio")?;
+                Ok(cur.done.clone())
+            }
+        }
+    }
+
+    fn active(&mut self) -> Vec<Segment> {
+        match self {
+            Diar::Live(d, _) => d.active(),
+            Diar::Replay(_, cur) => cur.open.clone(),
+        }
+    }
+
+    fn time(&self) -> f64 {
+        match self {
+            Diar::Live(d, _) => d.time(),
+            Diar::Replay(_, cur) => cur.time,
+        }
+    }
+
+    fn save(&self) -> Result<()> {
+        let Diar::Live(_, Some((path, steps))) = self else { return Ok(()) };
+        let text: String = steps.iter().map(|s| format!("{}|{}|{}\n", s.time, segs_text(&s.done), segs_text(&s.open))).collect();
+        Ok(std::fs::write(path, text)?)
+    }
+}
+
 pub struct Labeler {
-    diar: Diarizer,
+    diar: Diar,
     enc: Encoder,
     db: PeopleDb,
     encoder_file: String,
@@ -538,7 +615,13 @@ impl Labeler {
         let meeting = now_secs();
         let mut roster = Roster::new(threshold as f32);
         roster.meeting = meeting.clone();
-        Ok(Self { diar: Diarizer::load(&diar_model, Params::get().latency)?, enc: Encoder::load(&spk_model)?, db: PeopleDb::load_for(spk.file),
+        let diar = match std::env::var("RT_CAPTIONS_DIAR_TAPE").ok().as_deref().and_then(|t| t.split_once(':')) {
+            Some(("replay", f)) => Diar::replay(f)?,
+            Some(("record", f)) => Diar::Live(Diarizer::load(&diar_model, Params::get().latency)?, Some((f.into(), Vec::new()))),
+            Some(_) => bail!("RT_CAPTIONS_DIAR_TAPE: use record:<file> or replay:<file>"),
+            None => Diar::Live(Diarizer::load(&diar_model, Params::get().latency)?, None),
+        };
+        Ok(Self { diar, enc: Encoder::load(&spk_model)?, db: PeopleDb::load_for(spk.file),
                   encoder_file: spk.file.to_owned(), meeting, roster, total: 0,
                   hist: Vec::new(), hist_start: 0, sorted: 0, ended: Vec::new(), open: Vec::new(), last_feed_ms: 0.0, rec: None })
     }
@@ -686,6 +769,9 @@ impl Labeler {
     pub fn finish(&mut self) {
         self.roster.finish();
         self.save_finished();
+        if let Err(e) = self.diar.save() {
+            eprintln!("diarizer tape: {e:#}");
+        }
     }
 
     /// Who is speaking at the caption edge now: (turn id, label).
@@ -752,6 +838,14 @@ fn lone_speaker<'a>(segs: impl Iterator<Item = &'a Segment>, t: f64) -> Option<u
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diar_tape_round_trip() {
+        let segs = vec![seg(0, 0.32, 1.0 / 3.0), seg(2, 10.08, 12.000000001)];
+        assert_eq!(parse_segs(&segs_text(&segs)).unwrap(), segs);
+        assert!(parse_segs("").unwrap().is_empty());
+        assert!(parse_segs("1,2").is_err());
+    }
 
     fn seg(speaker: usize, start: f64, end: f64) -> Segment {
         Segment { speaker, start, end }
