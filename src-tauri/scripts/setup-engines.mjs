@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 // Our fork of mudler/parakeet.cpp, branch rt-captions: upstream master @5c9b0fb plus our patches
 // (streaming CTC decoding for hybrid models, RNN-T/CTC blank penalties; see the branch log).
 const PARAKEET_REPO = "https://github.com/latentsig/parakeet.cpp";
-const PARAKEET_COMMIT = "f678fb9e18520c91b30c02e1bf57c108837619dd"; // branch rt-captions
+const PARAKEET_COMMIT = "1e2085b8e6fae1eff81c32cddd1abfb2bedb0753"; // branch rt-captions
 const LLVM_MINGW = "llvm-mingw-20260922-ucrt-x86_64";
 
 const root = fileURLToPath(new URL("..", import.meta.url)); // src-tauri
