@@ -367,6 +367,12 @@ unsafe impl Send for Diarizer {}
 
 impl Diarizer {
     pub fn load(model_path: &Path, latency: c_int) -> Result<Self> {
+        // Speaker memory 64 + 32 frames (preset: 264 + 264): same 0.32 s latency, ~3.5x cheaper per
+        // step so it keeps up live on CPU; DER unchanged on AMI excerpts (23.0/5.6/44.6 vs 21.5/5.9/45.4).
+        // Read by our fork when the stream begins; set PARAKEET_DIAR_CACHE yourself to override.
+        if std::env::var_os("PARAKEET_DIAR_CACHE").is_none() {
+            engine_env("PARAKEET_DIAR_CACHE", "64,32,32");
+        }
         let ctx = Ctx::load(model_path)?;
         unsafe {
             let lib = &ctx._lib;
@@ -412,6 +418,17 @@ impl Diarizer {
             return Vec::new();
         }
         self.take(p, n)
+    }
+
+    /// Gives the calling thread its own engine backend with `threads` compute threads, so its
+    /// diarization runs beside the speech model instead of queueing behind it on the shared
+    /// backend (our fork; a no-op with other libraries and on a GPU). Call on the thread that feeds.
+    pub fn own_backend(&self, threads: usize) {
+        unsafe {
+            if let Ok(f) = self.ctx._lib.get::<unsafe extern "C" fn(c_int) -> c_int>(b"parakeet_capi_thread_backend\0") {
+                f(threads as c_int);
+            }
+        }
     }
 
     /// Seconds of audio diarized so far (trails the audio fed by up to the 0.32 s latency).

@@ -621,6 +621,10 @@ impl Labeler {
             Some(_) => bail!("RT_CAPTIONS_DIAR_TAPE: use record:<file> or replay:<file>"),
             None => Diar::Live(Diarizer::load(&diar_model, Params::get().latency)?, None),
         };
+        if let Diar::Live(d, _) = &diar {
+            // ponytail: 4 threads (this laptop's performance cores); tune if a machine with more cores lags
+            d.own_backend(4);
+        }
         Ok(Self { diar, enc: Encoder::load(&spk_model)?, db: PeopleDb::load_for(spk.file),
                   encoder_file: spk.file.to_owned(), meeting, roster, total: 0,
                   hist: Vec::new(), hist_start: 0, sorted: 0, ended: Vec::new(), open: Vec::new(), last_feed_ms: 0.0, rec: None })
