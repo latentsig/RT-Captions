@@ -418,6 +418,9 @@ pub struct FileRun {
     pub passes_ms: Vec<f64>,
     /// Seconds from a word's end to it being committed, with passes taking real time.
     pub commit_lag: Vec<f64>,
+    /// Streaming: seconds from a word's end to it first being on screen, final or pending (beam /
+    /// hotword decoding shows its undecided last words early; otherwise equals commit_lag).
+    pub shown_lag: Vec<f64>,
     pub busy_s: f64,
     pub duration_s: f64,
     /// Streaming: feeds that took longer than the audio they carried (audio queues up behind
@@ -486,13 +489,15 @@ pub fn run_file(asr: &mut Asr, path: &str, cfg: &StreamConfig, rnnoise: bool, bl
     let audio = read_wav_16k(path, rnnoise)?;
     let duration_s = audio.len() as f64 / SAMPLE_RATE as f64;
 
-    let mut run = FileRun { words: Vec::new(), passes_ms: Vec::new(), commit_lag: Vec::new(), busy_s: 0.0, duration_s, over_budget: 0, block };
+    let mut run = FileRun { words: Vec::new(), passes_ms: Vec::new(), commit_lag: Vec::new(), shown_lag: Vec::new(), busy_s: 0.0, duration_s, over_budget: 0, block };
     if asr.kind() == Kind::Streaming {
         // Streaming: 160 ms blocks arrive in real time; each feed holds the engine for its wall time.
         asr.reset_streams();
         let mut clock = 0.0f64;
         let pieces = audio.chunks(block).count();
         let start = Instant::now();
+        // When each word index first appeared on screen (final words, then pending words).
+        let (mut shown_at, mut screen): (Vec<f64>, String) = (Vec::new(), String::new());
         for (k, piece) in audio.chunks(block).chain(std::iter::once(&[0.0f32; 19_200][..])).enumerate() {
             let arrival = ((k + 1) * block).min(audio.len() + 19_200) as f64 / SAMPLE_RATE as f64;
             if realtime {
@@ -503,9 +508,12 @@ pub fn run_file(asr: &mut Asr, path: &str, cfg: &StreamConfig, rnnoise: bool, bl
             }
             clock = clock.max(arrival);
             let t = Instant::now();
-            let (_, mut words) = asr.stream_feed(0, piece)?;
+            let (text, mut words) = asr.stream_feed(0, piece)?;
+            screen.push_str(&text);
             if k == pieces {
-                words.extend(asr.stream_finish(0)?.1);
+                let (text, w) = asr.stream_finish(0)?;
+                screen.push_str(&text);
+                words.extend(w);
             }
             let el = t.elapsed().as_secs_f64();
             run.passes_ms.push(el * 1000.0);
@@ -515,8 +523,18 @@ pub fn run_file(asr: &mut Asr, path: &str, cfg: &StreamConfig, rnnoise: bool, bl
             }
             clock += el;
             for w in words {
+                if shown_at.len() <= run.words.len() {
+                    shown_at.push(clock);
+                }
                 run.commit_lag.push(clock - w.end);
+                run.shown_lag.push(shown_at[run.words.len()] - w.end);
                 run.words.push(w);
+            }
+            // ponytail: matches on-screen words (text so far, which shows partial words, + pending) to
+            // final ones by position; a rewrite that changes the word count can shift a few indices
+            let on_screen = screen.split_whitespace().count() + asr.pending(0).split_whitespace().count();
+            while shown_at.len() < on_screen {
+                shown_at.push(clock);
             }
         }
         return Ok(run);
@@ -599,7 +617,7 @@ fn bench(args: &[String], opt: &dyn Fn(&str) -> Option<String>) -> Result<()> {
         println!("(streaming engine: window/hop do not apply; --block sets samples per feed, default 1600 = the app's 100 ms)");
     }
     if streaming {
-        println!("{:>6} {:>16} {:>22} {:>7} {:>6} {:>7}", "block", "chunk ms p50/p95/max", "delay s p50/p95/p99", "queued", "busy", "WER");
+        println!("{:>6} {:>16} {:>22} {:>12} {:>7} {:>6} {:>7}", "block", "chunk ms p50/p95/max", "delay s p50/p95/p99", "shown p50/p95", "queued", "busy", "WER");
     } else {
         println!("{:>7} {:>6} {:>14} {:>16} {:>6} {:>7}", "window", "hop", "pass p50/p95", "solid p50/p95", "busy", "WER");
     }
@@ -614,9 +632,10 @@ fn bench(args: &[String], opt: &dyn Fn(&str) -> Option<String>) -> Result<()> {
             // compute of the feeds that ran the encoder (the rest just buffer audio)
             let chunks: Vec<f64> = run.passes_ms.iter().copied().filter(|&ms| ms > 2.0).collect();
             println!(
-                "{:>4}ms {:>5.0}/{:<4.0}/{:<5.0} {:>7.2}/{:<5.2}/{:<6.2}  {:>3}/{:<4} {:>4.0}% {:>7}",
+                "{:>4}ms {:>5.0}/{:<4.0}/{:<5.0} {:>7.2}/{:<5.2}/{:<6.2} {:>6.2}/{:<5.2}  {:>3}/{:<4} {:>4.0}% {:>7}",
                 run.block * 1000 / SAMPLE_RATE, pct(&chunks, 0.5), pct(&chunks, 0.95), pct(&chunks, 1.0),
                 pct(&run.commit_lag, 0.5), pct(&run.commit_lag, 0.95), pct(&run.commit_lag, 0.99),
+                pct(&run.shown_lag, 0.5), pct(&run.shown_lag, 0.95),
                 run.over_budget, run.passes_ms.len(), busy, wer
             );
         } else {

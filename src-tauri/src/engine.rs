@@ -54,7 +54,7 @@ pub struct AudioSettings {
 
 impl Default for AudioSettings {
     fn default() -> Self {
-        Self { source: "both".into(), engine: engines::DEFAULT.into(), threads: 0, mode: "balanced".into(), language: "en".into(), decoder: "rnnt".into(), blank_penalty: 0.5, ctc_blank_penalty: 0.5, nemotron_blank_penalty: 1.0, beam: 0, hotwords: Vec::new(), lookahead_ms: 240, rnnoise: false, skip_silence: false, speakers: true, speaker_threshold: 0.6, stream: StreamConfig::default() }
+        Self { source: "both".into(), engine: engines::DEFAULT.into(), threads: 0, mode: "balanced".into(), language: "en".into(), decoder: "rnnt".into(), blank_penalty: 0.5, ctc_blank_penalty: 0.5, nemotron_blank_penalty: 1.0, beam: 8, hotwords: Vec::new(), lookahead_ms: 240, rnnoise: false, skip_silence: false, speakers: true, speaker_threshold: 0.6, stream: StreamConfig::default() }
     }
 }
 
