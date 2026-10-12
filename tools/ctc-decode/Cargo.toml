@@ -1,0 +1,10 @@
+[package]
+name = "ctc-decode"
+version = "0.1.0"
+edition = "2021"
+
+# Standalone on purpose: no Tauri / audio deps, builds anywhere with plain cargo.
+[dependencies]
+
+[profile.release]
+opt-level = 3

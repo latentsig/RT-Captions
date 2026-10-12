@@ -5,3 +5,4 @@ src-tauri/engine/
 *.gguf
 *.cact
 src-tauri/binaries/
+tools/*/target/
