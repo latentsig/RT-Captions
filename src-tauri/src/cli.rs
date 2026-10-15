@@ -43,7 +43,7 @@ USAGE
   rt-captions uninstall-cli            take it off again
 
 KEYS (rt-captions settings shows all)
-  audio.engine  nemotron-q4|nemotron-q8|ultra|redux|<model file in the models folder>
+  audio.engine  nemotron-l22|nemotron-l19|nemotron-ft|ultra|redux|<model file in the models folder>
   audio.decoder  rnnt|ctc  audio.blank_penalty  0.5  audio.ctc_blank_penalty  0.5   (hybrid models)
   audio.nemotron_blank_penalty  1.0
   audio.beam  0|8   audio.hotwords  [jaundice, ...]   (hybrid models, CTC decoder)
@@ -385,7 +385,7 @@ fn diarize(path: &str, out: Option<String>, realtime: bool, live: bool) -> Resul
 fn transcribe_speakers(asr: &mut Asr, path: &str, rnnoise: bool) -> Result<()> {
     use crate::speakers::Labeler;
     if asr.kind() != Kind::Streaming {
-        bail!("--speakers needs a streaming engine (nemotron-q4 or nemotron-q8)");
+        bail!("--speakers needs a streaming engine (a Nemotron engine)");
     }
     let audio = read_wav_16k(path, rnnoise)?;
     let mut labeler = Labeler::load(settings::load().audio.speaker_threshold)?;

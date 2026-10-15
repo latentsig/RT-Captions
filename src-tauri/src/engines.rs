@@ -29,34 +29,46 @@ pub struct Engine {
     pub min_hop_s: f64,
 }
 
-pub const DEFAULT: &str = "nemotron-q4";
+pub const DEFAULT: &str = "nemotron-l22";
 
 // Measured on a 5-minute real meeting (i5-12450H, 4 threads).
 pub const ENGINES: &[Engine] = &[
+    // Nemotron Speech Streaming 0.6B, fine-tuned and/or layer-pruned by fhai50032 (NVIDIA Open
+    // Model License); RNN-T with audio.nemotron_blank_penalty 1.0.
     Engine {
-        id: "nemotron-q4",
-        name: "Nemotron streaming (4-bit)",
-        blurb: "Fastest accurate engine. ~17% WER, words in ~0.3-0.5 s",
+        id: "nemotron-l22",
+        name: "Nemotron fine-tuned, 22 layers",
+        blurb: "Most accurate live engine. ~10.5% WER, words in ~0.5 s; wants a fast CPU (or Performance mode)",
         kind: Kind::Streaming,
-        file: "nemotron-3.5-asr-streaming-0.6b-q4_k.gguf",
-        url: "https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/main/nemotron-3.5-asr-streaming-0.6b-q4_k.gguf",
-        bytes: 718_102_624,
+        file: "nt-ft2epB-l22_la3_q8_0.gguf",
+        url: "https://huggingface.co/fhai50032/bibo-asr-nemotron-gguf/resolve/main/nt-ft2epB-l22_la3_q8_0.gguf",
+        bytes: 831_750_688,
         min_hop_s: 0.0,
     },
     Engine {
-        id: "nemotron-q8",
-        name: "Nemotron streaming (8-bit)",
-        blurb: "~15% WER, words in ~0.3-0.5 s, more CPU",
+        id: "nemotron-l19",
+        name: "Nemotron, 19 layers",
+        blurb: "Fastest live engine. ~12% WER, words in ~0.4 s",
         kind: Kind::Streaming,
-        file: "nemotron-3.5-asr-streaming-0.6b-q8_0.gguf",
-        url: "https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/main/nemotron-3.5-asr-streaming-0.6b-q8_0.gguf",
-        bytes: 983_696_512,
+        file: "nt-l19_la3_q8_0.gguf",
+        url: "https://huggingface.co/fhai50032/bibo-asr-nemotron-gguf/resolve/main/nt-l19_la3_q8_0.gguf",
+        bytes: 723_524_160,
+        min_hop_s: 0.0,
+    },
+    Engine {
+        id: "nemotron-ft",
+        name: "Nemotron fine-tuned, 24 layers",
+        blurb: "Best with 1040 ms look-ahead: ~12% WER, words in ~1 s, light on the CPU",
+        kind: Kind::Streaming,
+        file: "nt-ft2epB_la3_q8_0.gguf",
+        url: "https://huggingface.co/fhai50032/bibo-asr-nemotron-gguf/resolve/main/nt-ft2epB_la3_q8_0.gguf",
+        bytes: 903_901_664,
         min_hop_s: 0.0,
     },
     Engine {
         id: "ultra",
         name: "Parakeet Ultra",
-        blurb: "Most accurate (~11-15% WER). Words in ~1.5-2.5 s",
+        blurb: "Offline model re-run on a rolling window (~11-15% WER offline). Words in ~1.5-2.5 s",
         kind: Kind::Rolling,
         file: "ultra-q8_0.gguf",
         url: "https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/main/ultra-q8_0.gguf",

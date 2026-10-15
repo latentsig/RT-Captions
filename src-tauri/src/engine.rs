@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 pub struct AudioSettings {
     /// "mic" | "system" | "both"
     pub source: String,
-    /// Speech engine id from engines.rs (default: Nemotron streaming 4-bit).
+    /// Speech engine id from engines.rs (default: Nemotron fine-tuned, 22 layers).
     pub engine: String,
     /// Compute threads for the model; 0 = pick from `mode`.
     pub threads: usize,

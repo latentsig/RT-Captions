@@ -885,7 +885,7 @@
   // ---------- engines ----------
   let engines = [], progress = {};
   // speed / accuracy out of 5, from the measured notes in the engine catalogue
-  const RATING = { "nemotron-q4": [5, 3], "nemotron-q8": [4, 4], ultra: [2, 5], redux: [3, 3] };
+  const RATING = { "nemotron-l22": [3, 5], "nemotron-l19": [5, 4], "nemotron-ft": [4, 4], ultra: [2, 4], redux: [3, 2] };
   const mb = b => b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : Math.round(b / 1e6) + " MB";
   const meter = (label, n) => { const m = el("span", "mt", label); m.setAttribute("aria-label", `${label} ${n} of 5`); for (let i = 0; i < 5; i++) m.append(el("i", i < n ? "on" : "")); return m; };
   async function loadEngines() { engines = await invoke("list_engines"); renderEngines(); }

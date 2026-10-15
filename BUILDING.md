@@ -46,8 +46,8 @@ cargo tauri build
 # check: target/release/bundle/macos/RT Captions.app/Contents/MacOS/rt-captions exists
 #        and Contents/Resources/engine contains both dylibs
 
-# 5. Smoke test without the GUI (downloads the default engine, ~720 MB, on first run)
-./target/release/rt-captions download nemotron-q4
+# 5. Smoke test without the GUI (downloads the default engine, ~830 MB, on first run)
+./target/release/rt-captions download nemotron-l22
 ./target/release/rt-captions doctor          # "loads OK"
 ./target/release/rt-captions listen --source mic --seconds 20   # speak; captions print
 ```
